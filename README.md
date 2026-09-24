@@ -1,13 +1,13 @@
 # Research Workbench
 
 Research Workbench is a reusable, provenance-first foundation for turning research into
-reviewable product decisions. Version 0.1 defines the protocol and core contracts; it does not
-perform literature searches or connect to providers.
+reviewable product decisions. Version 0.2 hardens the core contracts; it does not perform
+literature searches or connect to providers.
 
 ## What it is
 
-- A normalized internal representation for studies, constructs, measurements, interventions,
-  evidence assessments, and product implications.
+- A normalized internal representation for bibliographic sources, studies, constructs,
+  measurements, interventions, findings, evidence assessments, and product implications.
 - A versioned protocol for extracting, assessing, and promoting research into product guidance.
 - A producer of static, versioned export bundles that consumer projects can import without a
   runtime dependency on this package.
@@ -29,10 +29,11 @@ Workbench in production.
 
 1. Define a consumer-aware `ProjectProfile`.
 2. Conduct versioned research runs using an approved protocol and taxonomy.
-3. Normalize sources into study, measurement, and intervention records.
-4. Maintain a construct registry and synthesize bodies of evidence.
-5. Review architecture candidates and product implications.
-6. Publish a checksummed, versioned static export bundle.
+3. Normalize publications into source records, then separate studies or analyses.
+4. Extract measurements, interventions, and study-level findings with process provenance.
+5. Maintain a construct registry and synthesize findings into evidence assessments.
+6. Review architecture candidates and product implications.
+7. Publish a checksummed, versioned static export bundle.
 
 ## Repository map
 
@@ -40,7 +41,7 @@ Workbench in production.
 - `src/research_workbench/schemas`: validated import, configuration, and record boundaries.
 - `src/research_workbench/application/ports`: provider-neutral acquisition interfaces.
 - `src/research_workbench/application/export`: static bundle contracts and checksums.
-- `protocol`: Protocol v0.1 for taxonomy, extraction, evidence review, and promotion.
+- `protocol`: independently versioned taxonomy, extraction, evidence, and promotion guidance.
 - `templates`: example project profiles; these do not start a research run.
 
 Raw PDFs, corpora, provider dumps, and generated exports are intentionally ignored by Git.
@@ -57,5 +58,4 @@ uv run ruff format --check .
 uv run pyright
 ```
 
-Research Run 001 has not been started. Provider adapters will be considered only after Protocol
-v0.1 and these contracts are approved.
+Research Run 001 has not been started. Provider adapters remain outside the v0.2 hardening scope.

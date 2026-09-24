@@ -1,24 +1,35 @@
-# Extraction Protocol v0.1
+# Extraction Protocol v0.2
 
 ## Unit of extraction
 
-Extract one normalized study record per study or clearly separable analysis. Preserve the source's
-bibliographic identity and provider provenance separately from our interpretation of its findings.
-Record absence or uncertainty explicitly; do not fill gaps with assumptions.
+Create one source record per publication, report, chapter, or preprint. Create a separate study
+record for each study or clearly separable analysis reported by that source. Preserve provider
+identifiers as source provenance rather than adopting them as internal identity. Record absence or
+uncertainty explicitly; do not fill gaps with assumptions.
+
+The extraction and promotion chain is:
+
+```text
+Source/publication -> Study/analysis -> Measurement/Intervention -> Finding
+                   -> EvidenceAssessment -> ArchitectureCandidate/ProductImplication
+```
+
+A finding records what one study reported. An evidence assessment is the workbench's later
+cross-study judgment and references findings explicitly as supporting, contradictory, or null.
 
 ## Required extraction frame
 
-For each study, capture:
+Across the source and its studies, capture:
 
-1. citation and source identifiers;
-2. study type;
+1. source citation, URL, external identifiers, and provider provenance;
+2. each study's type or design;
 3. population, domain, setting, and sample;
 4. constructs and the source-attributed definitions used;
 5. operationalization and measurements;
 6. intervention or manipulation and comparator, when applicable;
 7. outcomes;
 8. timescale;
-9. main result, including direction and uncertainty;
+9. each finding's result, direction or status, generic estimate information, and uncertainty;
 10. limitations stated by authors and limitations identified by reviewers;
 11. moderators and subgroup conditions;
 12. replication and generalization notes;
@@ -29,8 +40,11 @@ For each study, capture:
 17. candidate architecture destination, including `none`;
 18. follow-up questions.
 
-Every extracted conclusion must retain a path to the study and source. Separate authors' claims
-from the workbench's evidence assessment.
+Every extracted or derived record that benefits from process traceability records its creation run,
+time, extraction method, optional tool or model version, and optional review state. This process
+provenance is separate from source-provider provenance. Every extracted conclusion must retain a
+path to the study and source. Separate author interpretation, reviewer notes, and the workbench's
+evidence assessment.
 
 ## Terms that must not be collapsed
 

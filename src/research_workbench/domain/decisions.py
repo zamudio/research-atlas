@@ -3,6 +3,8 @@
 from dataclasses import dataclass
 from uuid import UUID
 
+from research_workbench.domain.provenance import RecordProvenance
+
 
 @dataclass(frozen=True, slots=True)
 class ArchitectureCandidate:
@@ -20,6 +22,7 @@ class ArchitectureCandidate:
     status: str
     linked_evidence_ids: tuple[str, ...]
     linked_study_ids: tuple[UUID, ...]
+    record_provenance: RecordProvenance | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -34,3 +37,4 @@ class ProductImplication:
     linked_candidate_ids: tuple[str, ...]
     linked_evidence_ids: tuple[str, ...]
     linked_study_ids: tuple[UUID, ...]
+    record_provenance: RecordProvenance | None = None

@@ -4,12 +4,12 @@ from collections.abc import Iterable
 from typing import Protocol
 from uuid import UUID
 
-from research_workbench.domain.studies import StudyRecord
+from research_workbench.domain.studies import SourceRecord
 
 
 class ReferenceLibrary(Protocol):
     """Provider-neutral access to normalized references."""
 
-    def get_study(self, study_id: UUID) -> StudyRecord | None: ...
+    def get_source(self, source_id: UUID) -> SourceRecord | None: ...
 
-    def list_collection(self, collection_id: str) -> Iterable[StudyRecord]: ...
+    def list_collection(self, collection_id: str) -> Iterable[SourceRecord]: ...

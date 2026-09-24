@@ -3,13 +3,15 @@
 from dataclasses import dataclass
 from uuid import UUID
 
+from research_workbench.domain.provenance import RecordProvenance
+
 
 @dataclass(frozen=True, slots=True)
 class SourcedDefinition:
     """A definition and the studies or sources that support its attribution."""
 
     text: str
-    source_ids: tuple[str, ...]
+    source_ids: tuple[UUID, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -36,6 +38,7 @@ class ConstructRecord:
     inference_risks: tuple[str, ...]
     candidate_architecture_destinations: tuple[str, ...]
     review_status: str
+    record_provenance: RecordProvenance | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -51,3 +54,4 @@ class MeasurementRecord:
     timescale: str | None
     validity_notes: tuple[str, ...] = ()
     limitations: tuple[str, ...] = ()
+    record_provenance: RecordProvenance | None = None

@@ -4,7 +4,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Protocol
 
-from research_workbench.domain.studies import StudyRecord
+from research_workbench.domain.studies import SourceRecord
 
 
 @dataclass(frozen=True, slots=True)
@@ -16,4 +16,4 @@ class LiteratureQuery:
 class LiteratureSource(Protocol):
     """External discovery interface; implementations belong outside the domain."""
 
-    def search(self, query: LiteratureQuery) -> Iterable[StudyRecord]: ...
+    def search(self, query: LiteratureQuery) -> Iterable[SourceRecord]: ...

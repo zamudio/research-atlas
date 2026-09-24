@@ -31,6 +31,7 @@ require review.
 
 ## Traceability
 
-Each assessment lists supporting studies and, when known, contradictory and null findings.
+Each assessment lists supporting, contradictory, and null findings, each of which retains its
+study and source link.
 Uncertainty, limitations, and generalizability are first-class fields. A later assessment may
 supersede an earlier one, but the earlier version and its source links remain reproducible.

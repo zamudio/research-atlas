@@ -1,8 +1,10 @@
-"""Study, intervention, and research-run domain records."""
+"""Source, study, intervention, and research-run domain records."""
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
 from uuid import UUID
+
+from research_workbench.domain.provenance import RecordProvenance
 
 
 @dataclass(frozen=True, slots=True)
@@ -23,21 +25,31 @@ class SourceProvenance:
 
 
 @dataclass(frozen=True, slots=True)
-class StudyRecord:
-    """Normalized bibliographic identity and study metadata."""
+class SourceRecord:
+    """A publication, report, chapter, or preprint containing research studies."""
 
-    study_id: UUID
+    source_id: UUID
     title: str
     authors: tuple[str, ...]
     year: int | None
+    source_type: str
+    provider_provenance: tuple[SourceProvenance, ...]
+    external_identifiers: tuple[ExternalIdentifier, ...] = ()
+    source_url: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class StudyRecord:
+    """One study or clearly separable analysis reported by a source."""
+
+    study_id: UUID
+    source_id: UUID
     study_type: str
     population_summary: str
     domain_summary: str
     setting_summary: str
     sample_summary: str
-    provenance: tuple[SourceProvenance, ...]
-    external_identifiers: tuple[ExternalIdentifier, ...] = ()
-    source_url: str | None = None
+    study_label: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -52,6 +64,7 @@ class InterventionRecord:
     context: str
     outcomes_studied: tuple[str, ...]
     notes: str | None = None
+    record_provenance: RecordProvenance | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -85,4 +98,3 @@ class ResearchRun:
     excluded_source_references: tuple[str, ...] = ()
     notes: tuple[str, ...] = ()
     follow_up_questions: tuple[str, ...] = ()
-    metadata: dict[str, str] = field(default_factory=lambda: {})
