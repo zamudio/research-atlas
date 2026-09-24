@@ -1,9 +1,8 @@
 # Research Atlas
 
 Research Atlas is a reusable, provenance-first foundation for turning research into
-reviewable product decisions. Version 0.4.5 hardens Semantic Scholar request pacing, retries, and
-local execution ownership in the v0.4 provider/ingestion foundation while keeping the v0.3 records
-schema frozen.
+reviewable product decisions. Version 0.4.6 adds PowerShell-safe Semantic Scholar bulk-query input
+to the v0.4 provider/ingestion foundation while keeping the v0.3 records schema frozen.
 
 ## Core/project boundary
 
@@ -103,6 +102,23 @@ uv run research-atlas-dry-run "supply chain resilience" --limit 5 \
   --semantic-scholar-relevance "supply chain resilience systematic review" \
   --diagnose-s2-requests
 ```
+
+For complex native Semantic Scholar expressions on Windows PowerShell, pass the query through a
+UTF-8 file so PowerShell and `uv run` never have to reinterpret its quotes or operators. The file's
+contents are sent to Semantic Scholar exactly as written (including any trailing newline), so write
+only the query text:
+
+```powershell
+New-Item -ItemType Directory -Force tmp | Out-Null
+$bulkQueryPath = Join-Path $PWD "tmp\s2-bulk-query.txt"
+$bulkQuery = '"intelligent tutoring systems" + ("meta analysis" | "systematic review")'
+[IO.File]::WriteAllText($bulkQueryPath, $bulkQuery, [Text.UTF8Encoding]::new($false))
+uv run research-atlas-dry-run "intelligent tutoring systems" --limit 1 `
+  --semantic-scholar-bulk-file $bulkQueryPath
+```
+
+`--semantic-scholar-bulk QUERY` remains available for simple expressions and environments where
+shell quoting is reliable. The inline and file forms are mutually exclusive.
 
 OpenAlex and Semantic Scholar keys are optional for small calls. Copy `.env.example` to `.env` to
 set `RESEARCH_ATLAS_OPENALEX_API_KEY` or

@@ -39,10 +39,17 @@ def _parser() -> argparse.ArgumentParser:
         metavar="QUERY",
         help="also run S2 plain-text relevance search with this exact query",
     )
-    parser.add_argument(
+    bulk_query = parser.add_mutually_exclusive_group()
+    bulk_query.add_argument(
         "--semantic-scholar-bulk",
         metavar="QUERY",
         help="also run S2 Boolean/bulk search with this exact query",
+    )
+    bulk_query.add_argument(
+        "--semantic-scholar-bulk-file",
+        type=Path,
+        metavar="PATH",
+        help="also run S2 Boolean/bulk search with the exact UTF-8 contents of this file",
     )
     parser.add_argument("--output", type=Path, help="optional ignored tmp/ or exports/ JSON path")
     parser.add_argument(
@@ -51,6 +58,13 @@ def _parser() -> argparse.ArgumentParser:
         help="print secret-safe S2 physical-attempt telemetry to stderr",
     )
     return parser
+
+
+def _read_bulk_query(path: Path, parser: argparse.ArgumentParser) -> str:
+    try:
+        return path.read_text(encoding="utf-8")
+    except (OSError, UnicodeError) as error:
+        parser.error(f"cannot read Semantic Scholar bulk query file {path}: {error}")
 
 
 def _diagnostic_observer() -> AttemptObserver:
@@ -122,14 +136,18 @@ async def run_dry_run(
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    args = _parser().parse_args(argv)
+    parser = _parser()
+    args = parser.parse_args(argv)
+    semantic_scholar_bulk_query = args.semantic_scholar_bulk
+    if args.semantic_scholar_bulk_file is not None:
+        semantic_scholar_bulk_query = _read_bulk_query(args.semantic_scholar_bulk_file, parser)
     try:
         output = asyncio.run(
             run_dry_run(
                 args.query,
                 limit=args.limit,
                 semantic_scholar_relevance_query=args.semantic_scholar_relevance,
-                semantic_scholar_bulk_query=args.semantic_scholar_bulk,
+                semantic_scholar_bulk_query=semantic_scholar_bulk_query,
                 s2_attempt_observer=(_diagnostic_observer() if args.diagnose_s2_requests else None),
                 settings=ProviderSettings(),
             )
