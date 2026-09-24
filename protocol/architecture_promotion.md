@@ -5,7 +5,7 @@
 Consider promotion through the following gates:
 
 > Research relevance → definition clarity → evidence quality → generalizability → product
-> observability → inference reliability → pedagogical/product actionability → architectural
+> observability → inference reliability → project/domain actionability → architectural
 > necessity
 
 This is review guidance, not code-enforced truth. Record the rationale at each material gate. A

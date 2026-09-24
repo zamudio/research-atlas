@@ -15,8 +15,8 @@ Source/publication -> Study/analysis -> Measurement/Intervention -> Finding
                         -> optional, separate ArchitectureCandidate/ProductImplication
 ```
 
-A finding records what one study reported. An evidence assessment is the workbench's later
-judgment about an explicit claim or body of evidence and references findings as supporting,
+A finding records what one study reported. An evidence assessment is the later cross-study
+assessment of an explicit claim or body of evidence and references findings as supporting,
 contradictory, or null. It may link relevant constructs but is not required to resolve to one.
 
 ## Required extraction frame
