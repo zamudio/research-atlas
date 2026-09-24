@@ -1,0 +1,1 @@
+"""Static export bundle contracts."""

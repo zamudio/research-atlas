@@ -1,0 +1,30 @@
+schema_version: "0.1"
+project_id: "ai-tutor"
+product_name: "AI Tutor"
+research_domain: "learning foundations for an adaptive AI tutoring product"
+objectives:
+  - "Identify research-supported mechanisms and strategies that can inform tutoring behavior."
+  - "Define what evidence the product can responsibly observe and use."
+  - "Map supported conclusions to explicit product and architecture decisions."
+architecture_targets:
+  - "evidence"
+  - "persistent state"
+  - "session state"
+  - "concept state"
+  - "policy"
+  - "curriculum"
+  - "telemetry"
+  - "UX"
+  - "none"
+constraints_and_principles:
+  - "Distinguish observation from inference."
+  - "Do not infer unobservable traits."
+  - "Do not encode unsupported learning styles."
+  - "Do not promote constructs into architecture merely because they are frequently mentioned."
+scope:
+  age:
+    - "to be determined per research run"
+  population:
+    - "learners using AI-mediated tutoring"
+  domain:
+    - "cross-domain learning and tutoring"

@@ -1,0 +1,1 @@
+"""Trusted internal domain objects."""
