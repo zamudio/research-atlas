@@ -2,12 +2,14 @@
 
 from research_atlas.infrastructure.providers.openalex import OpenAlexLiteratureSource
 from research_atlas.infrastructure.providers.semantic_scholar import (
-    SemanticScholarLiteratureSource,
+    SemanticScholarBulkSearch,
+    SemanticScholarRelevanceSearch,
 )
 from research_atlas.infrastructure.providers.zotero import ZoteroReferenceLibrary
 
 __all__ = [
     "OpenAlexLiteratureSource",
-    "SemanticScholarLiteratureSource",
+    "SemanticScholarBulkSearch",
+    "SemanticScholarRelevanceSearch",
     "ZoteroReferenceLibrary",
 ]

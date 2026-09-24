@@ -6,8 +6,7 @@ from dataclasses import dataclass
 from typing import TypedDict
 
 from research_atlas.application.ports.literature_source import (
-    LiteratureQuery,
-    LiteratureSource,
+    LiteratureSearchRequest,
     LiteratureSourceError,
 )
 from research_atlas.application.source_identity import canonical_identity, merge_sources
@@ -28,6 +27,7 @@ class SerializedSource(TypedDict):
 
 class SerializedProviderOutcome(TypedDict):
     provider: str
+    operation: str
     success: bool
     raw_result_count: int | None
     error_type: str | None
@@ -36,7 +36,7 @@ class SerializedProviderOutcome(TypedDict):
 
 
 class SerializedDiscoveryReport(TypedDict):
-    query: str
+    searches: list[dict[str, str | int]]
     provider_outcomes: list[SerializedProviderOutcome]
     normalized_source_count: int
     cross_provider_merge_count: int
@@ -48,6 +48,7 @@ class ProviderOutcome:
     """Provider-neutral health and result-count information for one search."""
 
     provider: str
+    operation: str
     success: bool
     raw_result_count: int | None = None
     error_type: str | None = None
@@ -56,10 +57,20 @@ class ProviderOutcome:
 
 
 @dataclass(frozen=True, slots=True)
+class SearchSummary:
+    """Serializable identity and exact input for one requested provider operation."""
+
+    provider: str
+    operation: str
+    query: str
+    limit: int
+
+
+@dataclass(frozen=True, slots=True)
 class DiscoveryReport:
     """Normalized sources and observable outcomes from every configured provider."""
 
-    query: str
+    searches: tuple[SearchSummary, ...]
     sources: tuple[SourceRecord, ...]
     provider_outcomes: tuple[ProviderOutcome, ...]
 
@@ -69,8 +80,8 @@ class DiscoveryFailedError(RuntimeError):
 
     def __init__(self, report: DiscoveryReport) -> None:
         self.report = report
-        providers = ", ".join(outcome.provider for outcome in report.provider_outcomes)
-        super().__init__(f"all literature providers failed for query {report.query!r}: {providers}")
+        operations = ", ".join(outcome.operation for outcome in report.provider_outcomes)
+        super().__init__(f"all literature searches failed: {operations}")
 
 
 @dataclass(frozen=True, slots=True)
@@ -82,21 +93,33 @@ class _ProviderSearchResult:
 class DiscoverSources:
     """Search providers independently, then normalize their exact stable identities."""
 
-    def __init__(self, providers: Sequence[LiteratureSource]) -> None:
-        if not providers:
-            raise ValueError("at least one literature provider is required")
-        self._providers = tuple(providers)
+    def __init__(self, searches: Sequence[LiteratureSearchRequest]) -> None:
+        if not searches:
+            raise ValueError("at least one literature search is required")
+        operation_ids = [search.source.operation_id for search in searches]
+        if len(operation_ids) != len(set(operation_ids)):
+            raise ValueError("literature search operation IDs must be unique in one discovery call")
+        self._searches = tuple(searches)
 
-    async def execute(self, query: LiteratureQuery) -> DiscoveryReport:
-        """Return all unique results, treating ``query.limit`` as a per-provider limit."""
+    async def execute(self) -> DiscoveryReport:
+        """Run explicit provider operations and return their exact-identity union."""
 
         results = await asyncio.gather(
-            *(self._search_provider(provider, query) for provider in self._providers)
+            *(self._search_provider(search) for search in self._searches)
+        )
+        summaries = tuple(
+            SearchSummary(
+                provider=search.source.provider_id,
+                operation=search.source.operation_id,
+                query=search.query.query,
+                limit=search.query.limit,
+            )
+            for search in self._searches
         )
         outcomes = tuple(result.outcome for result in results)
         discovered = tuple(record for result in results for record in result.records)
         if not any(outcome.success for outcome in outcomes):
-            raise DiscoveryFailedError(DiscoveryReport(query.query, (), outcomes))
+            raise DiscoveryFailedError(DiscoveryReport(summaries, (), outcomes))
         merged = merge_sources(discovered)
         by_identity = {
             canonical_identity(record.external_identifiers, record.provider_provenance): record
@@ -107,14 +130,14 @@ class DiscoverSources:
             for record in discovered
         )
         sources = tuple(by_identity[identity] for identity in relevance_order)
-        return DiscoveryReport(query.query, sources, outcomes)
+        return DiscoveryReport(summaries, sources, outcomes)
 
     @staticmethod
     async def _search_provider(
-        provider: LiteratureSource, query: LiteratureQuery
+        search: LiteratureSearchRequest,
     ) -> _ProviderSearchResult:
         try:
-            records = await provider.search(query)
+            records = await search.source.search(search.query)
         except Exception as error:
             if isinstance(error, LiteratureSourceError):
                 error_type = error.error_type
@@ -124,7 +147,8 @@ class DiscoverSources:
                 status_code = None
             return _ProviderSearchResult(
                 ProviderOutcome(
-                    provider=provider.provider_id,
+                    provider=search.source.provider_id,
+                    operation=search.source.operation_id,
                     success=False,
                     error_type=error_type,
                     status_code=status_code,
@@ -134,7 +158,8 @@ class DiscoverSources:
             )
         return _ProviderSearchResult(
             ProviderOutcome(
-                provider=provider.provider_id,
+                provider=search.source.provider_id,
+                operation=search.source.operation_id,
                 success=True,
                 raw_result_count=len(records),
             ),
@@ -177,10 +202,19 @@ def serialize_report(report: DiscoveryReport) -> SerializedDiscoveryReport:
     """Serialize provider health and normalized sources for a dry-run review."""
 
     return {
-        "query": report.query,
+        "searches": [
+            {
+                "provider": search.provider,
+                "operation": search.operation,
+                "query": search.query,
+                "limit": search.limit,
+            }
+            for search in report.searches
+        ],
         "provider_outcomes": [
             {
                 "provider": outcome.provider,
+                "operation": outcome.operation,
                 "success": outcome.success,
                 "raw_result_count": outcome.raw_result_count,
                 "error_type": outcome.error_type,

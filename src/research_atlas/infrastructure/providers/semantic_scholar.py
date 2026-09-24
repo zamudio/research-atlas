@@ -51,12 +51,13 @@ class AsyncRequestCoordinator:
 _DEFAULT_REQUEST_COORDINATOR = AsyncRequestCoordinator(SEMANTIC_SCHOLAR_MINIMUM_INTERVAL_SECONDS)
 
 
-class SemanticScholarLiteratureSource:
-    """Secondary minimal paper relevance search adapter."""
+class _SemanticScholarLiteratureSource:
+    """Shared S2 authentication, mapping, retries, and cumulative request pacing."""
 
     base_url = "https://api.semanticscholar.org/graph/v1"
     _fields = "paperId,externalIds,title,authors,year,url,publicationTypes,venue"
     provider_id = "semantic_scholar"
+    operation_id: str
 
     def __init__(
         self,
@@ -95,20 +96,7 @@ class SemanticScholarLiteratureSource:
     async def _search(
         self, client: httpx.AsyncClient, query: LiteratureQuery
     ) -> tuple[SourceRecord, ...]:
-        response = await self._get(
-            client,
-            f"{self.base_url}/paper/search",
-            params={"query": query.query, "limit": min(query.limit, 100), "fields": self._fields},
-        )
-        payload = cast(Mapping[str, object], response.json())
-        data = payload.get("data", [])
-        if not isinstance(data, list):
-            raise ValueError("Semantic Scholar response data must be a list")
-        return tuple(
-            self._map_paper(cast(Mapping[str, object], paper))
-            for paper in cast(list[object], data)[: query.limit]
-            if isinstance(paper, Mapping)
-        )
+        raise NotImplementedError
 
     async def _get(
         self,
@@ -179,3 +167,67 @@ class SemanticScholarLiteratureSource:
             identifiers=identifiers,
             source_url=url if isinstance(url, str) else None,
         )
+
+
+class SemanticScholarRelevanceSearch(_SemanticScholarLiteratureSource):
+    """Plain-text, relevance-ranked Semantic Scholar paper discovery."""
+
+    operation_id = "semantic_scholar.relevance"
+
+    async def _search(
+        self, client: httpx.AsyncClient, query: LiteratureQuery
+    ) -> tuple[SourceRecord, ...]:
+        response = await self._get(
+            client,
+            f"{self.base_url}/paper/search",
+            params={"query": query.query, "limit": min(query.limit, 100), "fields": self._fields},
+        )
+        payload = cast(Mapping[str, object], response.json())
+        data = payload.get("data", [])
+        if not isinstance(data, list):
+            raise ValueError("Semantic Scholar response data must be a list")
+        return tuple(
+            self._map_paper(cast(Mapping[str, object], paper))
+            for paper in cast(list[object], data)[: query.limit]
+            if isinstance(paper, Mapping)
+        )
+
+
+class SemanticScholarBulkSearch(_SemanticScholarLiteratureSource):
+    """Boolean/filter-oriented Semantic Scholar bulk paper retrieval."""
+
+    operation_id = "semantic_scholar.bulk"
+
+    async def _search(
+        self, client: httpx.AsyncClient, query: LiteratureQuery
+    ) -> tuple[SourceRecord, ...]:
+        params: dict[str, str | int] = {"query": query.query, "fields": self._fields}
+        records: list[SourceRecord] = []
+        seen_tokens: set[str] = set()
+        while len(records) < query.limit:
+            response = await self._get(
+                client,
+                f"{self.base_url}/paper/search/bulk",
+                params=params,
+            )
+            payload = cast(Mapping[str, object], response.json())
+            data = payload.get("data", [])
+            if not isinstance(data, list):
+                raise ValueError("Semantic Scholar response data must be a list")
+            for paper in cast(list[object], data):
+                if isinstance(paper, Mapping):
+                    records.append(self._map_paper(cast(Mapping[str, object], paper)))
+                    if len(records) == query.limit:
+                        break
+            token = payload.get("token")
+            if (
+                len(records) >= query.limit
+                or not data
+                or not isinstance(token, str)
+                or not token
+                or token in seen_tokens
+            ):
+                break
+            seen_tokens.add(token)
+            params["token"] = token
+        return tuple(records)

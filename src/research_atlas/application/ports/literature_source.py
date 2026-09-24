@@ -17,7 +17,7 @@ class LiteratureSourceError(RuntimeError):
 
 @dataclass(frozen=True, slots=True)
 class LiteratureQuery:
-    """Provider search text and the maximum results requested from each provider."""
+    """Exact text and result limit for one explicitly selected search operation."""
 
     query: str
     limit: int = 8
@@ -25,9 +25,20 @@ class LiteratureQuery:
 
 
 class LiteratureSource(Protocol):
-    """External discovery interface; implementations belong outside the domain."""
+    """One external discovery operation; implementations belong outside the domain."""
 
     @property
     def provider_id(self) -> str: ...
 
+    @property
+    def operation_id(self) -> str: ...
+
     async def search(self, query: LiteratureQuery) -> tuple[SourceRecord, ...]: ...
+
+
+@dataclass(frozen=True, slots=True)
+class LiteratureSearchRequest:
+    """Pair one provider operation with the exact query text intended for its semantics."""
+
+    source: LiteratureSource
+    query: LiteratureQuery

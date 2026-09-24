@@ -30,6 +30,7 @@ class OpenAlexLiteratureSource:
         )
     )
     provider_id = "openalex"
+    operation_id = "openalex.search"
 
     def __init__(self, api_key: str | None = None, client: httpx.AsyncClient | None = None) -> None:
         self._api_key = api_key

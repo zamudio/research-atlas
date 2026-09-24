@@ -1,9 +1,9 @@
 # Research Atlas
 
 Research Atlas is a reusable, provenance-first foundation for turning research into
-reviewable product decisions. Version 0.4.3 hardens provider authentication and request coordination
-in the v0.4 provider/ingestion foundation and its small developer dry run while keeping the v0.3
-records schema frozen.
+reviewable product decisions. Version 0.4.4 makes provider search semantics explicit in the v0.4
+provider/ingestion foundation and its small developer dry run while keeping the v0.3 records schema
+frozen.
 
 ## Core/project boundary
 
@@ -81,20 +81,23 @@ Raw PDFs, corpora, provider dumps, and generated exports are intentionally ignor
 
 ## Provider dry run
 
-The dry run discovers and normalizes publications with `--limit` applied per provider, so
-`--limit 10` with two providers may return up to 20 sources before cross-provider deduplication. It
+The dry run discovers and normalizes publications with `--limit` applied per requested operation,
+so three operations at `--limit 10` may return up to 30 sources before exact-ID deduplication. It
 does not create `ResearchRun`, study, finding, evidence, architecture, or product records, and it
 does not call an LLM.
 
-`LiteratureQuery.query` is passed through as provider search syntax; precise phrase and Boolean
-queries are recommended for evidence-focused searches. `LiteratureQuery.limit` is a per-provider
-limit, so `--limit 3 --semantic-scholar` may return up to six unique normalized sources before
-cross-provider deduplication. Broad semantic or exploratory discovery may be considered later but
-is not part of v0.4.3.
+Every search request selects one provider operation and carries the exact query intended for that
+operation; query syntax is not assumed portable. OpenAlex receives the positional query. Semantic
+Scholar relevance search uses `/paper/search` for plain-natural-language, relevance-ranked
+exploration. Semantic Scholar bulk search uses `/paper/search/bulk` for Boolean/filter-oriented,
+non-relevance-ranked retrieval. The CLI never guesses which S2 semantics a query intends.
 
 ```shell
 uv run research-atlas-dry-run "urban heat mitigation systematic review" --limit 8
-uv run research-atlas-dry-run "supply chain resilience" --limit 5 --semantic-scholar
+uv run research-atlas-dry-run "supply chain resilience" --limit 5 \
+  --semantic-scholar-relevance "supply chain resilience systematic review"
+uv run research-atlas-dry-run "museum conservation" --limit 5 \
+  --semantic-scholar-bulk '"museum conservation" AND (review OR preservation)'
 uv run research-atlas-dry-run "museum conservation methods" --output tmp/dry-run.json
 ```
 
@@ -105,14 +108,16 @@ set `RESEARCH_ATLAS_OPENALEX_API_KEY` or
 `group`), and an API key where the library requires one. The Zotero adapter is read-only and uses
 `pyzotero`.
 
-OpenAlex remains the primary provider and Semantic Scholar is an optional secondary provider.
-Provider searches are isolated: a throttled or unavailable secondary provider is reported in the
-dry-run output without discarding successful OpenAlex results. Discovery fails only when every
-configured provider fails. All Semantic Scholar adapter instances in one Python process share an
-async request coordinator that reserves request-start slots at least 1.1 seconds apart. Retries and
-future endpoint methods routed through the adapter re-enter that same coordinator. Coordination is
-not distributed across OS processes or machines, so the current operational assumption is one
-active Semantic Scholar-using Research Atlas process per API key.
+OpenAlex remains the primary provider and Semantic Scholar is optional. Provider operations are
+isolated: a throttled relevance search is reported without discarding successful OpenAlex or S2
+bulk results. Outcomes distinguish `openalex.search`, `semantic_scholar.relevance`, and
+`semantic_scholar.bulk`, while records from both S2 operations retain canonical
+`semantic_scholar` provenance. Discovery fails only when every requested operation fails. All
+Semantic Scholar operations in one Python process share an async request coordinator that reserves
+request-start slots at least 1.1 seconds apart. Pagination, retries, paper lookup, and future
+endpoint methods routed through this boundary re-enter that same coordinator. Coordination is not
+distributed across OS processes or machines, so the current operational assumption is one active
+Semantic Scholar-using Research Atlas process per API key.
 
 OpenAlex sends its optional API key only as an `Authorization: Bearer` header. Its ordinary API
 keeps provider-appropriate retry/backoff behavior and is not subjected to Semantic Scholar's 1.1

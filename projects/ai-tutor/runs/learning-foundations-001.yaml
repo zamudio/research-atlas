@@ -90,10 +90,18 @@ screening_stages:
   - "extraction and mapping"
 
 search_strategy:
-  approach: "Use multiple targeted query variants per landscape family; exact queries are run data."
+  approach: >-
+    Use multiple targeted, operation-appropriate query variants per landscape family; every exact
+    query and its selected provider operation are run data.
   providers:
-    primary: "OpenAlex"
-    secondary_optional: "Semantic Scholar"
+    primary:
+      provider: "OpenAlex"
+      operation: "provider-native search"
+    secondary_optional:
+      provider: "Semantic Scholar"
+      operations:
+        relevance: "plain natural-language exploratory discovery, relevance-ranked"
+        bulk: "Boolean and filter-oriented retrieval, not relevance-ranked"
     manual_cross_check: "Elicit"
     canonical_library: "Zotero"
   citation_chaining: true

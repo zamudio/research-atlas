@@ -9,7 +9,10 @@ from research_atlas.application.discovery import (
     DiscoveryFailedError,
     serialize_report,
 )
-from research_atlas.application.ports.literature_source import LiteratureQuery
+from research_atlas.application.ports.literature_source import (
+    LiteratureQuery,
+    LiteratureSearchRequest,
+)
 from research_atlas.infrastructure.providers.openalex import OpenAlexLiteratureSource
 
 
@@ -113,7 +116,9 @@ def test_openalex_provider_error_is_sanitized() -> None:
         async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
             source = OpenAlexLiteratureSource(api_key, client)
             with pytest.raises(DiscoveryFailedError) as caught:
-                await DiscoverSources((source,)).execute(LiteratureQuery("safe query", limit=1))
+                await DiscoverSources(
+                    (LiteratureSearchRequest(source, LiteratureQuery("safe query", limit=1)),)
+                ).execute()
             serialized = json.dumps(serialize_report(caught.value.report))
             assert api_key not in serialized
             assert caught.value.report.provider_outcomes[0].error_message == (

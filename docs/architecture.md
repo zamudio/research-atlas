@@ -56,20 +56,29 @@ provenance, not primary identity. Application ports discover or retrieve `Source
 one source may report multiple `StudyRecord` objects. Study findings are captured independently
 before cross-study synthesis.
 
-Literature discovery is async because OpenAlex and Semantic Scholar are independent network calls;
-the application service executes them concurrently while exposing one consistent port. Each
-provider outcome is reported independently, partial success preserves available results, and a
-discovery fails only when all configured providers fail. Query text passes through to provider
-search syntax unchanged, and the query limit applies to each provider rather than globally; all
-unique results remain after exact-identity deduplication. The
+Literature discovery is async because provider operations are independent network calls; the
+application service executes explicit search requests concurrently through one consistent port.
+Each request pairs one selected operation with its exact query, so provider query syntax is never
+assumed portable. Each outcome reports both canonical provider and operation, partial success
+preserves available results, and discovery fails only when all requested operations fail. The query
+limit applies to each operation rather than globally; all unique results remain after exact-identity
+deduplication. The
 read-only Zotero reference-library port remains synchronous because `pyzotero` is synchronous.
 Raw response types are contained in adapters and never enter application or domain contracts.
 
+Semantic Scholar relevance search is a plain-natural-language, relevance-ranked operation using
+`/paper/search`. Boolean/filter-oriented retrieval is a separate, non-relevance-ranked bulk
+operation using `/paper/search/bulk` and its continuation token. Both retain canonical
+`semantic_scholar` source provenance while their discovery outcomes use distinct operation labels.
+Exact query strings and operation choices remain project/run data. A relevance failure does not
+invalidate successful bulk or other-provider results.
+
 Semantic Scholar's credential-wide traffic policy is represented by one process-wide in-process
-coordinator. It atomically reserves monotonic request-start slots at least 1.1 seconds apart across
-all default adapter instances; retries pass through the same boundary. It does not coordinate
-across OS processes or machines, and operations therefore allow only one active Semantic
-Scholar-using process per key. Distributed coordination is intentionally deferred.
+coordinator shared by every S2 operation and endpoint. It atomically reserves monotonic
+request-start slots at least 1.1 seconds apart across all default adapter instances; pagination and
+retries pass through the same boundary. It does not coordinate across OS processes or machines,
+and operations therefore allow only one active Semantic Scholar-using process per key. Distributed
+coordination is intentionally deferred.
 
 OpenAlex authentication uses an `Authorization: Bearer` header, never a query parameter. OpenAlex
 retains provider-appropriate retry/backoff without an artificial 1.1-second global throttle because
