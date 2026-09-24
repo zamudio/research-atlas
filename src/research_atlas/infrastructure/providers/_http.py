@@ -46,7 +46,7 @@ def parse_retry_after_delay(retry_after: str | None) -> float | None:
             if retry_at.tzinfo is None:
                 retry_at = retry_at.replace(tzinfo=UTC)
             return max(0.0, (retry_at - datetime.now(UTC)).total_seconds())
-        except (TypeError, ValueError, OverflowError):
+        except TypeError, ValueError, OverflowError:
             return None
 
 

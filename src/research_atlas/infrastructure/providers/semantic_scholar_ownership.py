@@ -18,7 +18,7 @@ class SemanticScholarOwnershipGuard:
         self._lock_path = lock_path or Path(tempfile.gettempdir()) / "research-atlas-s2.lock"
         self._file: BinaryIO | None = None
 
-    def __enter__(self) -> "SemanticScholarOwnershipGuard":
+    def __enter__(self) -> SemanticScholarOwnershipGuard:
         lock_file = self._lock_path.open("a+b")
         try:
             lock_file.seek(0)

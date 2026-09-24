@@ -143,7 +143,8 @@ separate in v0.4. Provider provenance and external identifiers are combined dete
 
 ## Development
 
-Requires Python 3.12 and [uv](https://docs.astral.sh/uv/).
+Requires Python 3.14.7 and [uv](https://docs.astral.sh/uv/). Use uv to create and manage
+the project `.venv`; uv reads `.python-version` and selects the intended Python patch release.
 
 ```shell
 uv sync
