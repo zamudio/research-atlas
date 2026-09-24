@@ -24,7 +24,7 @@ Elicit integration is deferred: this project does not scrape or browser-automate
 API limits. A future Elicit export or API importer can use the same ingestion boundary.
 
 Consumer projects such as AI Tutor receive curated exports. They do not import or run Research
-Workbench in production.
+Atlas in production.
 
 ## Lifecycle
 
@@ -67,9 +67,9 @@ uv run research-atlas-dry-run "formative feedback" --output tmp/dry-run.json
 ```
 
 OpenAlex and Semantic Scholar keys are optional for small calls. Copy `.env.example` to `.env` to
-set `RESEARCH_WORKBENCH_OPENALEX_API_KEY` or
-`RESEARCH_WORKBENCH_SEMANTIC_SCHOLAR_API_KEY`. Zotero access requires
-`RESEARCH_WORKBENCH_ZOTERO_LIBRARY_ID`, `RESEARCH_WORKBENCH_ZOTERO_LIBRARY_TYPE` (`user` or
+set `RESEARCH_ATLAS_OPENALEX_API_KEY` or
+`RESEARCH_ATLAS_SEMANTIC_SCHOLAR_API_KEY`. Zotero access requires
+`RESEARCH_ATLAS_ZOTERO_LIBRARY_ID`, `RESEARCH_ATLAS_ZOTERO_LIBRARY_TYPE` (`user` or
 `group`), and an API key where the library requires one. The Zotero adapter is read-only and uses
 `pyzotero`.
 

@@ -27,7 +27,7 @@ class ZoteroReferenceLibrary:
     @classmethod
     def from_settings(cls, settings: ProviderSettings) -> "ZoteroReferenceLibrary":
         if not settings.zotero_library_id:
-            raise ValueError("RESEARCH_WORKBENCH_ZOTERO_LIBRARY_ID is required")
+            raise ValueError("RESEARCH_ATLAS_ZOTERO_LIBRARY_ID is required")
         from pyzotero import zotero
 
         client = zotero.Zotero(

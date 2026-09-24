@@ -4,9 +4,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class ProviderSettings(BaseSettings):
-    model_config = SettingsConfigDict(
-        env_file=".env", env_prefix="RESEARCH_WORKBENCH_", extra="ignore"
-    )
+    model_config = SettingsConfigDict(env_file=".env", env_prefix="RESEARCH_ATLAS_", extra="ignore")
 
     openalex_api_key: str | None = None
     semantic_scholar_api_key: str | None = None
