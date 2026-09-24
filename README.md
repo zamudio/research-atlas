@@ -58,8 +58,10 @@ Raw PDFs, corpora, provider dumps, and generated exports are intentionally ignor
 
 ## Provider dry run
 
-The dry run discovers and normalizes 1–10 publications. It does not create `ResearchRun`, study,
-finding, evidence, architecture, or product records, and it does not call an LLM.
+The dry run discovers and normalizes publications with `--limit` applied per provider, so
+`--limit 10` with two providers may return up to 20 sources before cross-provider deduplication. It
+does not create `ResearchRun`, study, finding, evidence, architecture, or product records, and it
+does not call an LLM.
 
 `LiteratureQuery.query` is passed through as provider search syntax; precise phrase and Boolean
 queries are recommended for evidence-focused searches. `LiteratureQuery.limit` is a per-provider
