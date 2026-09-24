@@ -415,7 +415,7 @@ wheels = [
 ]
 
 [[package]]
-name = "research-workbench"
+name = "research-atlas"
 version = "0.4.0"
 source = { editable = "." }
 dependencies = [

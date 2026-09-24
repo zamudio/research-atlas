@@ -5,7 +5,7 @@ from collections.abc import Iterable
 from dataclasses import replace
 from uuid import UUID, uuid5
 
-from research_workbench.domain.studies import (
+from research_atlas.domain.studies import (
     ExternalIdentifier,
     SourceProvenance,
     SourceRecord,

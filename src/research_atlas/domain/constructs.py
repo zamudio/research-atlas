@@ -3,7 +3,7 @@
 from dataclasses import dataclass
 from uuid import UUID
 
-from research_workbench.domain.provenance import RecordProvenance
+from research_atlas.domain.provenance import RecordProvenance
 
 
 @dataclass(frozen=True, slots=True)

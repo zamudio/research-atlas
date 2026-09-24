@@ -6,10 +6,10 @@ from typing import cast
 
 import httpx
 
-from research_workbench.application.ports.literature_source import LiteratureQuery
-from research_workbench.application.source_identity import identified_source
-from research_workbench.domain.studies import ExternalIdentifier, SourceProvenance, SourceRecord
-from research_workbench.infrastructure.providers._http import get_with_retries
+from research_atlas.application.ports.literature_source import LiteratureQuery
+from research_atlas.application.source_identity import identified_source
+from research_atlas.domain.studies import ExternalIdentifier, SourceProvenance, SourceRecord
+from research_atlas.infrastructure.providers._http import get_with_retries
 
 
 class OpenAlexLiteratureSource:

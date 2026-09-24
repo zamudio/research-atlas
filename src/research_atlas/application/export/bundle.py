@@ -7,8 +7,8 @@ from typing import Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from research_workbench.domain.versioning import ProtocolVersions
-from research_workbench.schemas.research_records import ResearchRecords
+from research_atlas.domain.versioning import ProtocolVersions
+from research_atlas.schemas.research_records import ResearchRecords
 
 
 class ContentFile(BaseModel):

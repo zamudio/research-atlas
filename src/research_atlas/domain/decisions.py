@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass
 
-from research_workbench.domain.provenance import RecordProvenance
+from research_atlas.domain.provenance import RecordProvenance
 
 
 @dataclass(frozen=True, slots=True)

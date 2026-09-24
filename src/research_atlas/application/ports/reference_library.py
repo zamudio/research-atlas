@@ -3,7 +3,7 @@
 from collections.abc import Iterable
 from typing import Protocol
 
-from research_workbench.domain.studies import SourceRecord
+from research_atlas.domain.studies import SourceRecord
 
 
 class ReferenceLibrary(Protocol):

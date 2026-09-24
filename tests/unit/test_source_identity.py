@@ -2,12 +2,12 @@ from datetime import UTC, datetime
 
 import pytest
 
-from research_workbench.application.source_identity import (
+from research_atlas.application.source_identity import (
     identified_source,
     merge_sources,
     normalize_doi,
 )
-from research_workbench.domain.studies import ExternalIdentifier, SourceProvenance
+from research_atlas.domain.studies import ExternalIdentifier, SourceProvenance
 
 
 @pytest.mark.parametrize(

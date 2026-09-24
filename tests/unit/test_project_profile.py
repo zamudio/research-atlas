@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from research_workbench.schemas.project_profile import ProjectProfile
+from research_atlas.schemas.project_profile import ProjectProfile
 
 
 def test_ai_tutor_template_parses() -> None:

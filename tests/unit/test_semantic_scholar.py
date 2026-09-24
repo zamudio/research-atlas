@@ -2,8 +2,8 @@ import asyncio
 
 import httpx
 
-from research_workbench.application.ports.literature_source import LiteratureQuery
-from research_workbench.infrastructure.providers.semantic_scholar import (
+from research_atlas.application.ports.literature_source import LiteratureQuery
+from research_atlas.infrastructure.providers.semantic_scholar import (
     SemanticScholarLiteratureSource,
 )
 

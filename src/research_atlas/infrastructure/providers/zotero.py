@@ -5,9 +5,9 @@ from collections.abc import Iterable, Mapping
 from datetime import UTC, datetime
 from typing import Protocol, cast
 
-from research_workbench.application.source_identity import identified_source
-from research_workbench.domain.studies import ExternalIdentifier, SourceProvenance, SourceRecord
-from research_workbench.infrastructure.config import ProviderSettings
+from research_atlas.application.source_identity import identified_source
+from research_atlas.domain.studies import ExternalIdentifier, SourceProvenance, SourceRecord
+from research_atlas.infrastructure.config import ProviderSettings
 
 
 class ZoteroClient(Protocol):

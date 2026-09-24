@@ -3,7 +3,7 @@
 from dataclasses import dataclass
 from typing import Protocol
 
-from research_workbench.domain.studies import SourceRecord
+from research_atlas.domain.studies import SourceRecord
 
 
 @dataclass(frozen=True, slots=True)

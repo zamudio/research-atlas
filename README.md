@@ -1,6 +1,6 @@
-# Research Workbench
+# Research Atlas
 
-Research Workbench is a reusable, provenance-first foundation for turning research into
+Research Atlas is a reusable, provenance-first foundation for turning research into
 reviewable product decisions. Version 0.4 adds a provider/ingestion foundation and a small
 developer dry run while keeping the v0.3 records schema frozen.
 
@@ -43,13 +43,13 @@ manifest's project ID, protocol versions, and taxonomy version.
 
 ## Repository map
 
-- `src/research_workbench/domain`: trusted internal dataclasses.
-- `src/research_workbench/schemas`: validated import, configuration, and record boundaries.
-- `src/research_workbench/application/ports`: provider-neutral acquisition interfaces.
-- `src/research_workbench/application/source_identity.py`: stable identity and exact-ID merging.
-- `src/research_workbench/infrastructure/providers`: OpenAlex, Semantic Scholar, and Zotero
+- `src/research_atlas/domain`: trusted internal dataclasses.
+- `src/research_atlas/schemas`: validated import, configuration, and record boundaries.
+- `src/research_atlas/application/ports`: provider-neutral acquisition interfaces.
+- `src/research_atlas/application/source_identity.py`: stable identity and exact-ID merging.
+- `src/research_atlas/infrastructure/providers`: OpenAlex, Semantic Scholar, and Zotero
   adapters.
-- `src/research_workbench/application/export`: static bundle contracts and checksums.
+- `src/research_atlas/application/export`: static bundle contracts and checksums.
 - `protocol`: independently versioned taxonomy, extraction, evidence, and promotion guidance.
 - `templates`: example project profiles; these do not start a research run.
 
@@ -61,9 +61,9 @@ The dry run discovers and normalizes 1–10 publications. It does not create `Re
 finding, evidence, architecture, or product records, and it does not call an LLM.
 
 ```shell
-uv run research-workbench-dry-run "formative feedback intelligent tutoring" --limit 8
-uv run research-workbench-dry-run "formative feedback" --limit 5 --semantic-scholar
-uv run research-workbench-dry-run "formative feedback" --output tmp/dry-run.json
+uv run research-atlas-dry-run "formative feedback intelligent tutoring" --limit 8
+uv run research-atlas-dry-run "formative feedback" --limit 5 --semantic-scholar
+uv run research-atlas-dry-run "formative feedback" --output tmp/dry-run.json
 ```
 
 OpenAlex and Semantic Scholar keys are optional for small calls. Copy `.env.example` to `.env` to

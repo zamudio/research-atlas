@@ -5,10 +5,10 @@ from typing import Self
 
 from pydantic import BaseModel, ConfigDict, model_validator
 
-from research_workbench.domain.constructs import ConstructRecord, MeasurementRecord
-from research_workbench.domain.decisions import ArchitectureCandidate, ProductImplication
-from research_workbench.domain.evidence import EvidenceAssessment, FindingRecord
-from research_workbench.domain.studies import (
+from research_atlas.domain.constructs import ConstructRecord, MeasurementRecord
+from research_atlas.domain.decisions import ArchitectureCandidate, ProductImplication
+from research_atlas.domain.evidence import EvidenceAssessment, FindingRecord
+from research_atlas.domain.studies import (
     InterventionRecord,
     ResearchRun,
     SourceRecord,

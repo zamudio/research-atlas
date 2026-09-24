@@ -4,8 +4,8 @@ from dataclasses import dataclass
 from datetime import datetime
 from uuid import UUID
 
-from research_workbench.domain.provenance import RecordProvenance
-from research_workbench.domain.versioning import ProtocolVersions
+from research_atlas.domain.provenance import RecordProvenance
+from research_atlas.domain.versioning import ProtocolVersions
 
 
 @dataclass(frozen=True, slots=True)

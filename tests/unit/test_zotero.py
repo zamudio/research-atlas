@@ -1,7 +1,7 @@
 from collections.abc import Iterable, Mapping
 from typing import Any
 
-from research_workbench.infrastructure.providers.zotero import ZoteroReferenceLibrary
+from research_atlas.infrastructure.providers.zotero import ZoteroReferenceLibrary
 
 
 class FakeZotero:

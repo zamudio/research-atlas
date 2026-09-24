@@ -4,9 +4,9 @@ import asyncio
 from collections.abc import Sequence
 from typing import TypedDict
 
-from research_workbench.application.ports.literature_source import LiteratureQuery, LiteratureSource
-from research_workbench.application.source_identity import canonical_identity, merge_sources
-from research_workbench.domain.studies import SourceRecord
+from research_atlas.application.ports.literature_source import LiteratureQuery, LiteratureSource
+from research_atlas.application.source_identity import canonical_identity, merge_sources
+from research_atlas.domain.studies import SourceRecord
 
 
 class DiscoveryResult(TypedDict):

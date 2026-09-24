@@ -2,8 +2,8 @@ import asyncio
 
 import httpx
 
-from research_workbench.application.ports.literature_source import LiteratureQuery
-from research_workbench.infrastructure.providers.openalex import OpenAlexLiteratureSource
+from research_atlas.application.ports.literature_source import LiteratureQuery
+from research_atlas.infrastructure.providers.openalex import OpenAlexLiteratureSource
 
 
 def test_openalex_maps_mocked_work_and_retries_rate_limit() -> None:

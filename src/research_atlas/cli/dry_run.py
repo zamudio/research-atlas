@@ -6,11 +6,11 @@ import json
 from collections.abc import Sequence
 from pathlib import Path
 
-from research_workbench.application.discovery import DiscoverSources, serialize_sources
-from research_workbench.application.ports.literature_source import LiteratureQuery, LiteratureSource
-from research_workbench.infrastructure.config import ProviderSettings
-from research_workbench.infrastructure.providers.openalex import OpenAlexLiteratureSource
-from research_workbench.infrastructure.providers.semantic_scholar import (
+from research_atlas.application.discovery import DiscoverSources, serialize_sources
+from research_atlas.application.ports.literature_source import LiteratureQuery, LiteratureSource
+from research_atlas.infrastructure.config import ProviderSettings
+from research_atlas.infrastructure.providers.openalex import OpenAlexLiteratureSource
+from research_atlas.infrastructure.providers.semantic_scholar import (
     SemanticScholarLiteratureSource,
 )
 

@@ -6,34 +6,34 @@ from uuid import UUID
 import pytest
 from pydantic import ValidationError
 
-from research_workbench.application.export.bundle import (
+from research_atlas.application.export.bundle import (
     ContentFile,
     ExportBundle,
     ExportBundleManifest,
     ExportCounts,
 )
-from research_workbench.domain.constructs import (
+from research_atlas.domain.constructs import (
     CandidateObservable,
     ConstructRecord,
     MeasurementRecord,
     SourcedDefinition,
 )
-from research_workbench.domain.decisions import ArchitectureCandidate, ProductImplication
-from research_workbench.domain.evidence import (
+from research_atlas.domain.decisions import ArchitectureCandidate, ProductImplication
+from research_atlas.domain.evidence import (
     EvidenceAssessment,
     EvidenceDimension,
     FindingRecord,
 )
-from research_workbench.domain.provenance import RecordProvenance
-from research_workbench.domain.studies import (
+from research_atlas.domain.provenance import RecordProvenance
+from research_atlas.domain.studies import (
     InterventionRecord,
     ResearchRun,
     SourceProvenance,
     SourceRecord,
     StudyRecord,
 )
-from research_workbench.domain.versioning import ProtocolVersions
-from research_workbench.schemas.research_records import ResearchRecords
+from research_atlas.domain.versioning import ProtocolVersions
+from research_atlas.schemas.research_records import ResearchRecords
 
 SOURCE_ID = UUID("19ab3dc6-f09f-49df-aadc-357e0746658b")
 STUDY_ID = UUID("b2bdbd04-bf4f-4d6c-aad2-cdf9ded46562")

@@ -1,6 +1,6 @@
 # Architecture
 
-Research Workbench uses a small ports-and-domain boundary.
+Research Atlas uses a small ports-and-domain boundary.
 
 ```text
 external tools/providers

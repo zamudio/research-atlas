@@ -1,9 +1,9 @@
 import asyncio
 
-from research_workbench.application.discovery import DiscoverSources, serialize_sources
-from research_workbench.application.ports.literature_source import LiteratureQuery
-from research_workbench.application.source_identity import identified_source
-from research_workbench.domain.studies import ExternalIdentifier, SourceProvenance, SourceRecord
+from research_atlas.application.discovery import DiscoverSources, serialize_sources
+from research_atlas.application.ports.literature_source import LiteratureQuery
+from research_atlas.application.source_identity import identified_source
+from research_atlas.domain.studies import ExternalIdentifier, SourceProvenance, SourceRecord
 
 
 class FakeLiteratureSource:
