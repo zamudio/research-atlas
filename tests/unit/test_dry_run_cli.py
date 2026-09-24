@@ -138,6 +138,41 @@ def test_bulk_query_file_preserves_exact_complex_query(
     assert received_query == exact_query
 
 
+def test_bulk_query_file_preserves_crlf(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from research_atlas.cli import dry_run
+
+    exact_query = '"intelligent tutoring systems" + review\r\n-year:2020\r\n'
+    query_file = tmp_path / "s2-bulk-query.txt"
+    query_file.write_text(exact_query, encoding="utf-8", newline="")
+    received_query: str | None = None
+
+    async def fake_run_dry_run(
+        query_text: str,
+        *,
+        limit: int,
+        settings: ProviderSettings,
+        semantic_scholar_relevance_query: str | None = None,
+        semantic_scholar_bulk_query: str | None = None,
+        **_kwargs: object,
+    ) -> str:
+        del query_text, limit, settings, semantic_scholar_relevance_query
+        nonlocal received_query
+        received_query = semantic_scholar_bulk_query
+        return "{}\n"
+
+    monkeypatch.setattr(dry_run, "run_dry_run", fake_run_dry_run)
+
+    result = dry_run.main(
+        ["openalex query", "--semantic-scholar-bulk-file", str(query_file), "--limit", "1"]
+    )
+
+    assert result == 0
+    assert received_query == exact_query
+
+
 def test_inline_bulk_query_remains_backward_compatible(monkeypatch: pytest.MonkeyPatch) -> None:
     from research_atlas.cli import dry_run
 

@@ -62,7 +62,7 @@ def _parser() -> argparse.ArgumentParser:
 
 def _read_bulk_query(path: Path, parser: argparse.ArgumentParser) -> str:
     try:
-        return path.read_text(encoding="utf-8")
+        return path.read_text(encoding="utf-8", newline="")
     except (OSError, UnicodeError) as error:
         parser.error(f"cannot read Semantic Scholar bulk query file {path}: {error}")
 
