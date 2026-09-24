@@ -12,13 +12,19 @@ import httpx
 from research_atlas.application.ports.literature_source import LiteratureQuery
 from research_atlas.application.source_identity import identified_source
 from research_atlas.domain.studies import ExternalIdentifier, SourceProvenance, SourceRecord
-from research_atlas.infrastructure.providers._http import Sleep, get_with_retries
+from research_atlas.infrastructure.providers._http import (
+    AttemptObserver,
+    Sleep,
+    default_retry_delay,
+    get_with_retries,
+    parse_retry_after_delay,
+)
 
 SEMANTIC_SCHOLAR_MINIMUM_INTERVAL_SECONDS = 1.1
 
 
 class AsyncRequestCoordinator:
-    """Reserve async request-start slots with a monotonic minimum interval."""
+    """Grant actual request starts with a monotonic minimum interval."""
 
     def __init__(
         self,
@@ -32,20 +38,35 @@ class AsyncRequestCoordinator:
         self._minimum_interval_seconds = minimum_interval_seconds
         self._clock = clock
         self._sleep = sleep
-        self._reservation_lock = Lock()
-        self._next_start_at: float | None = None
+        self._start_lock = Lock()
+        self._last_start_at: float | None = None
 
     async def wait(self) -> None:
-        """Atomically reserve a start slot, then wait without holding the lock."""
+        """Sleep and re-check until this caller can atomically claim the current start."""
 
-        with self._reservation_lock:
-            now = self._clock()
-            start_at = now if self._next_start_at is None else max(now, self._next_start_at)
-            self._next_start_at = start_at + self._minimum_interval_seconds
-
-        delay = max(0.0, start_at - self._clock())
-        if delay > 0:
+        while True:
+            with self._start_lock:
+                now = self._clock()
+                delay = (
+                    0.0
+                    if self._last_start_at is None
+                    else self._last_start_at + self._minimum_interval_seconds - now
+                )
+                if delay <= 0:
+                    self._last_start_at = now
+                    return
             await self._sleep(delay)
+
+
+def semantic_scholar_retry_delay(status_code: int, retry_after: str | None, attempt: int) -> float:
+    """Back off S2 429s for 5 then 10 seconds unless Retry-After is valid."""
+
+    if status_code != 429:
+        return default_retry_delay(status_code, retry_after, attempt)
+    parsed_retry_after = parse_retry_after_delay(retry_after)
+    if parsed_retry_after is not None:
+        return parsed_retry_after
+    return 5.0 * (2**attempt)
 
 
 _DEFAULT_REQUEST_COORDINATOR = AsyncRequestCoordinator(SEMANTIC_SCHOLAR_MINIMUM_INTERVAL_SECONDS)
@@ -68,6 +89,8 @@ class _SemanticScholarLiteratureSource:
         clock: Callable[[], float] | None = None,
         sleep: Sleep | None = None,
         retry_sleep: Sleep = asyncio.sleep,
+        attempt_observer: AttemptObserver | None = None,
+        attempt_clock: Callable[[], float] = monotonic,
     ) -> None:
         self._api_key = api_key
         self._client = client
@@ -84,6 +107,8 @@ class _SemanticScholarLiteratureSource:
         else:
             self._request_coordinator = _DEFAULT_REQUEST_COORDINATOR
         self._retry_sleep = retry_sleep
+        self._attempt_observer = attempt_observer
+        self._attempt_clock = attempt_clock
 
     async def search(self, query: LiteratureQuery) -> tuple[SourceRecord, ...]:
         if query.limit < 1:
@@ -115,6 +140,12 @@ class _SemanticScholarLiteratureSource:
             headers=headers,
             sleep=self._retry_sleep,
             before_request=self._request_coordinator.wait,
+            retry_delay_policy=semantic_scholar_retry_delay,
+            attempt_observer=self._attempt_observer,
+            provider=self.provider_id,
+            operation_id=self.operation_id,
+            endpoint_path=httpx.URL(url).path,
+            clock=self._attempt_clock,
         )
 
     @staticmethod

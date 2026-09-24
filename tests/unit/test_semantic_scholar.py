@@ -1,5 +1,6 @@
 import asyncio
 import json
+from itertools import pairwise
 from math import isclose
 
 import httpx
@@ -16,6 +17,7 @@ from research_atlas.application.ports.literature_source import (
 )
 from research_atlas.domain.studies import SourceRecord
 from research_atlas.infrastructure.providers import semantic_scholar
+from research_atlas.infrastructure.providers._http import RequestAttemptEvent
 from research_atlas.infrastructure.providers.semantic_scholar import (
     SEMANTIC_SCHOLAR_MINIMUM_INTERVAL_SECONDS,
     AsyncRequestCoordinator,
@@ -51,6 +53,14 @@ def isolated_coordinator(clock: FakeMonotonicClock) -> AsyncRequestCoordinator:
 def assert_floats_close(actual: list[float], expected: list[float]) -> None:
     assert len(actual) == len(expected)
     assert all(isclose(left, right) for left, right in zip(actual, expected, strict=True))
+
+
+def assert_minimum_spacing(starts: list[float]) -> None:
+    assert all(
+        later - earlier >= SEMANTIC_SCHOLAR_MINIMUM_INTERVAL_SECONDS
+        or isclose(later - earlier, SEMANTIC_SCHOLAR_MINIMUM_INTERVAL_SECONDS)
+        for earlier, later in pairwise(starts)
+    )
 
 
 def test_semantic_scholar_maps_mocked_paper() -> None:
@@ -176,55 +186,55 @@ def test_two_default_instances_share_pacing_and_first_request_does_not_sleep(
 
 
 def test_concurrent_requests_across_instances_reserve_separate_slots() -> None:
-    request_count = 0
+    class OversleepClock:
+        def __init__(self) -> None:
+            self.now = 0.0
+            self.delays: list[float] = []
+            self.waiting = 0
+            self.both_waiting = asyncio.Event()
+            self.release = asyncio.Event()
 
-    def handler(_request: httpx.Request) -> httpx.Response:
-        nonlocal request_count
-        request_count += 1
-        return httpx.Response(200, json={"data": []})
+        def __call__(self) -> float:
+            return self.now
 
-    async def run_searches() -> None:
-        delays: list[float] = []
-        reservations_ready = asyncio.Event()
-        release_sleepers = asyncio.Event()
+        async def sleep(self, delay: float) -> None:
+            self.delays.append(delay)
+            self.waiting += 1
+            if self.waiting == 2:
+                self.both_waiting.set()
+            if not self.release.is_set():
+                await self.release.wait()
+                return
+            self.now += delay
+            await asyncio.sleep(0)
 
-        async def deferred_sleep(delay: float) -> None:
-            delays.append(delay)
-            if len(delays) == 2:
-                reservations_ready.set()
-            await release_sleepers.wait()
+    async def run_waiters() -> tuple[list[float], list[float]]:
+        clock = OversleepClock()
+        coordinator = AsyncRequestCoordinator(
+            SEMANTIC_SCHOLAR_MINIMUM_INTERVAL_SECONDS,
+            clock=clock,
+            sleep=clock.sleep,
+        )
+        starts: list[float] = []
+        await coordinator.wait()
+        starts.append(clock())
 
-        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-            coordinator = AsyncRequestCoordinator(
-                SEMANTIC_SCHOLAR_MINIMUM_INTERVAL_SECONDS,
-                clock=lambda: 0.0,
-                sleep=deferred_sleep,
-            )
-            sources = tuple(
-                SemanticScholarRelevanceSearch(
-                    client=client,
-                    request_coordinator=coordinator,
-                )
-                for _ in range(3)
-            )
-            searches = asyncio.gather(
-                *(source.search(LiteratureQuery("query", limit=1)) for source in sources)
-            )
-            await reservations_ready.wait()
-            assert request_count == 1
-            assert_floats_close(
-                delays,
-                [
-                    SEMANTIC_SCHOLAR_MINIMUM_INTERVAL_SECONDS,
-                    SEMANTIC_SCHOLAR_MINIMUM_INTERVAL_SECONDS * 2,
-                ],
-            )
-            release_sleepers.set()
-            await searches
+        async def wait_and_record() -> None:
+            await coordinator.wait()
+            starts.append(clock())
 
-    asyncio.run(run_searches())
+        waiters = asyncio.gather(wait_and_record(), wait_and_record())
+        await clock.both_waiting.wait()
+        clock.now = 5.0
+        clock.release.set()
+        await waiters
+        return starts, clock.delays
 
-    assert request_count == 3
+    starts, delays = asyncio.run(run_waiters())
+
+    assert_floats_close(starts, [0.0, 5.0, 6.1])
+    assert_floats_close(delays, [1.1, 1.1, 1.1])
+    assert_minimum_spacing(starts)
 
 
 def test_coordinator_uses_injected_monotonic_elapsed_time() -> None:
@@ -244,6 +254,16 @@ def test_coordinator_uses_injected_monotonic_elapsed_time() -> None:
 
     assert_floats_close(clock.delays, [0.7])
     assert isclose(clock(), 101.1)
+
+
+def test_coordinator_can_be_reused_across_repeated_event_loops() -> None:
+    clock = FakeMonotonicClock()
+    coordinator = isolated_coordinator(clock)
+
+    asyncio.run(coordinator.wait())
+    asyncio.run(coordinator.wait())
+
+    assert_floats_close(clock.delays, [SEMANTIC_SCHOLAR_MINIMUM_INTERVAL_SECONDS])
 
 
 def test_retry_backoff_and_request_coordinator_compose() -> None:
@@ -269,6 +289,140 @@ def test_retry_backoff_and_request_coordinator_compose() -> None:
 
     assert_floats_close(request_starts, [0.0, SEMANTIC_SCHOLAR_MINIMUM_INTERVAL_SECONDS])
     assert_floats_close(clock.delays, [0.5, 0.6])
+
+
+def test_s2_429_without_retry_after_uses_conservative_cooldown() -> None:
+    clock = FakeMonotonicClock()
+    request_starts: list[float] = []
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        request_starts.append(clock())
+        if len(request_starts) < 3:
+            return httpx.Response(429)
+        return httpx.Response(200, json={"data": []})
+
+    async def run_search() -> None:
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            await SemanticScholarRelevanceSearch(
+                client=client,
+                request_coordinator=isolated_coordinator(clock),
+                retry_sleep=clock.sleep,
+                attempt_clock=clock,
+            ).search(LiteratureQuery("cool down", limit=1))
+
+    asyncio.run(run_search())
+
+    assert_floats_close(request_starts, [0.0, 5.0, 15.0])
+    assert_floats_close(clock.delays, [5.0, 10.0])
+
+
+def test_s2_429_retry_after_is_honored_and_attempts_are_observable() -> None:
+    clock = FakeMonotonicClock()
+    events: list[RequestAttemptEvent] = []
+    api_key = "never-log-this-key"
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        if not events:
+            return httpx.Response(429, headers={"Retry-After": "7"})
+        return httpx.Response(200, json={"data": []})
+
+    async def run_search() -> None:
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            await SemanticScholarBulkSearch(
+                api_key,
+                client,
+                request_coordinator=isolated_coordinator(clock),
+                retry_sleep=clock.sleep,
+                attempt_observer=events.append,
+                attempt_clock=clock,
+            ).search(LiteratureQuery("private query", limit=1))
+
+    asyncio.run(run_search())
+
+    assert_floats_close(clock.delays, [7.0])
+    assert [event.response_status for event in events] == [429, 200]
+    assert [event.retry_delay for event in events] == [7.0, None]
+    assert [event.attempt_number for event in events] == [1, 2]
+    assert all(event.endpoint_path == "/graph/v1/paper/search/bulk" for event in events)
+    assert api_key not in repr(events)
+    assert "private query" not in repr(events)
+
+
+def test_relevance_and_bulk_successes_share_actual_start_spacing() -> None:
+    clock = FakeMonotonicClock()
+    starts: list[float] = []
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        starts.append(clock())
+        return httpx.Response(200, json={"data": []})
+
+    async def run_searches() -> None:
+        coordinator = isolated_coordinator(clock)
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            await asyncio.gather(
+                SemanticScholarRelevanceSearch(
+                    client=client, request_coordinator=coordinator
+                ).search(LiteratureQuery("relevance", limit=1)),
+                SemanticScholarBulkSearch(client=client, request_coordinator=coordinator).search(
+                    LiteratureQuery("bulk", limit=1)
+                ),
+            )
+
+    asyncio.run(run_searches())
+
+    assert_floats_close(starts, [0.0, 1.1])
+
+
+def test_relevance_and_bulk_429_retries_are_serialized_with_long_cooldowns() -> None:
+    class YieldingClock(FakeMonotonicClock):
+        async def sleep(self, delay: float) -> None:
+            self.delays.append(delay)
+            self.advance(delay)
+            await asyncio.sleep(0)
+
+    clock = YieldingClock()
+    starts: list[float] = []
+    calls_by_path: dict[str, int] = {}
+    events: list[RequestAttemptEvent] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        starts.append(clock())
+        path = request.url.path
+        calls_by_path[path] = calls_by_path.get(path, 0) + 1
+        if calls_by_path[path] < 3:
+            return httpx.Response(429)
+        return httpx.Response(200, json={"data": []})
+
+    async def run_searches() -> None:
+        coordinator = isolated_coordinator(clock)
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            await asyncio.gather(
+                SemanticScholarRelevanceSearch(
+                    client=client,
+                    request_coordinator=coordinator,
+                    retry_sleep=clock.sleep,
+                    attempt_observer=events.append,
+                    attempt_clock=clock,
+                ).search(LiteratureQuery("relevance", limit=1)),
+                SemanticScholarBulkSearch(
+                    client=client,
+                    request_coordinator=coordinator,
+                    retry_sleep=clock.sleep,
+                    attempt_observer=events.append,
+                    attempt_clock=clock,
+                ).search(LiteratureQuery("bulk", limit=1)),
+            )
+
+    asyncio.run(run_searches())
+
+    assert len(starts) == 6
+    assert_minimum_spacing(starts)
+    retry_delays = [event.retry_delay for event in events if event.retry_delay is not None]
+    assert retry_delays == [5.0, 5.0, 10.0, 10.0]
+    assert {event.operation_id for event in events} == {
+        "semantic_scholar.relevance",
+        "semantic_scholar.bulk",
+    }
 
 
 def test_api_key_is_header_only_and_does_not_leak_into_provider_error() -> None:

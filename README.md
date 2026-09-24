@@ -1,9 +1,9 @@
 # Research Atlas
 
 Research Atlas is a reusable, provenance-first foundation for turning research into
-reviewable product decisions. Version 0.4.4 makes provider search semantics explicit in the v0.4
-provider/ingestion foundation and its small developer dry run while keeping the v0.3 records schema
-frozen.
+reviewable product decisions. Version 0.4.5 hardens Semantic Scholar request pacing, retries, and
+local execution ownership in the v0.4 provider/ingestion foundation while keeping the v0.3 records
+schema frozen.
 
 ## Core/project boundary
 
@@ -99,6 +99,9 @@ uv run research-atlas-dry-run "supply chain resilience" --limit 5 \
 uv run research-atlas-dry-run "museum conservation" --limit 5 \
   --semantic-scholar-bulk '"museum conservation" AND (review OR preservation)'
 uv run research-atlas-dry-run "museum conservation methods" --output tmp/dry-run.json
+uv run research-atlas-dry-run "supply chain resilience" --limit 5 \
+  --semantic-scholar-relevance "supply chain resilience systematic review" \
+  --diagnose-s2-requests
 ```
 
 OpenAlex and Semantic Scholar keys are optional for small calls. Copy `.env.example` to `.env` to
@@ -113,11 +116,20 @@ isolated: a throttled relevance search is reported without discarding successful
 bulk results. Outcomes distinguish `openalex.search`, `semantic_scholar.relevance`, and
 `semantic_scholar.bulk`, while records from both S2 operations retain canonical
 `semantic_scholar` provenance. Discovery fails only when every requested operation fails. All
-Semantic Scholar operations in one Python process share an async request coordinator that reserves
-request-start slots at least 1.1 seconds apart. Pagination, retries, paper lookup, and future
-endpoint methods routed through this boundary re-enter that same coordinator. Coordination is not
-distributed across OS processes or machines, so the current operational assumption is one active
-Semantic Scholar-using Research Atlas process per API key.
+Semantic Scholar operations in one Python process share an async request coordinator that grants
+actual request starts at least 1.1 seconds apart. A delayed waiter re-checks the monotonic clock and
+cannot pass beside another overdue waiter. Pagination and every retry re-enter that coordinator.
+The dry-run CLI also takes a fail-fast OS lock from system temporary storage whenever any S2
+operation is requested, allowing only one S2-enabled Research Atlas dry run on the local machine at
+a time. This lock is released on normal completion and exceptions and does not contain credential
+material. Coordination across machines remains deferred.
+
+S2 responses with `Retry-After` honor it. An S2 429 without that header waits 5 seconds before the
+second attempt and 10 seconds before the third; 5xx and transport retries retain the generic short
+0.5/1.0-second backoff. `--diagnose-s2-requests` prints one secret-safe line per physical S2 attempt
+to stderr (operation, endpoint path, attempt, elapsed monotonic start, status, retry reason, and
+delay) while JSON stdout remains clean. Authenticated live S2 canaries must run only from the
+user's local checkout; Codex/cloud environments use mocks and fake clocks and must not run them.
 
 OpenAlex sends its optional API key only as an `Authorization: Bearer` header. Its ordinary API
 keeps provider-appropriate retry/backoff behavior and is not subjected to Semantic Scholar's 1.1

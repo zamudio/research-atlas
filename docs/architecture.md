@@ -74,11 +74,22 @@ Exact query strings and operation choices remain project/run data. A relevance f
 invalidate successful bulk or other-provider results.
 
 Semantic Scholar's credential-wide traffic policy is represented by one process-wide in-process
-coordinator shared by every S2 operation and endpoint. It atomically reserves monotonic
-request-start slots at least 1.1 seconds apart across all default adapter instances; pagination and
-retries pass through the same boundary. It does not coordinate across OS processes or machines,
-and operations therefore allow only one active Semantic Scholar-using process per key. Distributed
-coordination is intentionally deferred.
+coordinator shared by every S2 operation and endpoint. A waiter sleeps outside a short thread-safe
+critical section, then re-reads monotonic time before atomically claiming an actual start. This
+prevents overslept reservations from collapsing into simultaneous starts and works when a
+module-level coordinator is reused across repeated event loops. Pagination and retries pass through
+the same 1.1-second boundary.
+
+The dry-run CLI adds same-machine single ownership for S2-enabled execution with a non-blocking OS
+byte-range lock in system temporary storage. A competing local process fails fast; the lock is
+released by context-manager cleanup on success or failure, and neither its path nor its error
+contains credential material. This is deliberately ownership rather than distributed pacing:
+cross-machine coordination remains deferred. S2 429 responses honor `Retry-After`, or use
+deterministic 5- and 10-second cooldowns when it is absent. Other retryable failures retain the
+generic 0.5- and 1.0-second backoff. An optional attempt observer receives secret-safe operation,
+endpoint-path, attempt, monotonic-start, status, retry-reason, and delay events; the dry-run
+`--diagnose-s2-requests` flag renders them to stderr without contaminating JSON stdout. Authenticated
+S2 live canaries are restricted to the user's local checkout, never Codex/cloud environments.
 
 OpenAlex authentication uses an `Authorization: Bearer` header, never a query parameter. OpenAlex
 retains provider-appropriate retry/backoff without an artificial 1.1-second global throttle because
