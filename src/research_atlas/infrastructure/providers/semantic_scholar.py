@@ -3,6 +3,7 @@
 import asyncio
 from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
+from threading import Lock
 from time import monotonic
 from typing import cast
 
@@ -16,8 +17,8 @@ from research_atlas.infrastructure.providers._http import Sleep, get_with_retrie
 SEMANTIC_SCHOLAR_MINIMUM_INTERVAL_SECONDS = 1.1
 
 
-class AsyncRequestRateLimiter:
-    """Serialize request starts with an async, monotonic minimum interval."""
+class AsyncRequestCoordinator:
+    """Reserve async request-start slots with a monotonic minimum interval."""
 
     def __init__(
         self,
@@ -31,20 +32,23 @@ class AsyncRequestRateLimiter:
         self._minimum_interval_seconds = minimum_interval_seconds
         self._clock = clock
         self._sleep = sleep
-        self._lock = asyncio.Lock()
-        self._last_started_at: float | None = None
+        self._reservation_lock = Lock()
+        self._next_start_at: float | None = None
 
     async def wait(self) -> None:
-        """Wait until the next request may start, then reserve that start time."""
+        """Atomically reserve a start slot, then wait without holding the lock."""
 
-        async with self._lock:
+        with self._reservation_lock:
             now = self._clock()
-            if self._last_started_at is not None:
-                remaining = self._minimum_interval_seconds - (now - self._last_started_at)
-                if remaining > 0:
-                    await self._sleep(remaining)
-                    now = self._clock()
-            self._last_started_at = now
+            start_at = now if self._next_start_at is None else max(now, self._next_start_at)
+            self._next_start_at = start_at + self._minimum_interval_seconds
+
+        delay = max(0.0, start_at - self._clock())
+        if delay > 0:
+            await self._sleep(delay)
+
+
+_DEFAULT_REQUEST_COORDINATOR = AsyncRequestCoordinator(SEMANTIC_SCHOLAR_MINIMUM_INTERVAL_SECONDS)
 
 
 class SemanticScholarLiteratureSource:
@@ -59,17 +63,25 @@ class SemanticScholarLiteratureSource:
         api_key: str | None = None,
         client: httpx.AsyncClient | None = None,
         *,
-        clock: Callable[[], float] = monotonic,
-        sleep: Sleep = asyncio.sleep,
+        request_coordinator: AsyncRequestCoordinator | None = None,
+        clock: Callable[[], float] | None = None,
+        sleep: Sleep | None = None,
         retry_sleep: Sleep = asyncio.sleep,
     ) -> None:
         self._api_key = api_key
         self._client = client
-        self._rate_limiter = AsyncRequestRateLimiter(
-            SEMANTIC_SCHOLAR_MINIMUM_INTERVAL_SECONDS,
-            clock=clock,
-            sleep=sleep,
-        )
+        if request_coordinator is not None and (clock is not None or sleep is not None):
+            raise ValueError("request_coordinator cannot be combined with clock or sleep")
+        if request_coordinator is not None:
+            self._request_coordinator = request_coordinator
+        elif clock is not None or sleep is not None:
+            self._request_coordinator = AsyncRequestCoordinator(
+                SEMANTIC_SCHOLAR_MINIMUM_INTERVAL_SECONDS,
+                clock=clock or monotonic,
+                sleep=sleep or asyncio.sleep,
+            )
+        else:
+            self._request_coordinator = _DEFAULT_REQUEST_COORDINATOR
         self._retry_sleep = retry_sleep
 
     async def search(self, query: LiteratureQuery) -> tuple[SourceRecord, ...]:
@@ -114,7 +126,7 @@ class SemanticScholarLiteratureSource:
             params=params,
             headers=headers,
             sleep=self._retry_sleep,
-            before_request=self._rate_limiter.wait,
+            before_request=self._request_coordinator.wait,
         )
 
     @staticmethod

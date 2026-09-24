@@ -65,6 +65,17 @@ unique results remain after exact-identity deduplication. The
 read-only Zotero reference-library port remains synchronous because `pyzotero` is synchronous.
 Raw response types are contained in adapters and never enter application or domain contracts.
 
+Semantic Scholar's credential-wide traffic policy is represented by one process-wide in-process
+coordinator. It atomically reserves monotonic request-start slots at least 1.1 seconds apart across
+all default adapter instances; retries pass through the same boundary. It does not coordinate
+across OS processes or machines, and operations therefore allow only one active Semantic
+Scholar-using process per key. Distributed coordination is intentionally deferred.
+
+OpenAlex authentication uses an `Authorization: Bearer` header, never a query parameter. OpenAlex
+retains provider-appropriate retry/backoff without an artificial 1.1-second global throttle because
+its ordinary and specialized endpoints have different policies. Endpoint-specific coordination and
+usage/budget telemetry can be added later where required.
+
 Canonical scholarly identity is DOI, then PMID or arXiv, then provider namespace plus provider
 record ID. Internal source UUIDs are UUID5 values over that identity. Deduplication merges only an
 exact normalized stable identity and deterministically unions external identifiers and provider

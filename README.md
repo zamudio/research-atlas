@@ -1,9 +1,9 @@
 # Research Atlas
 
 Research Atlas is a reusable, provenance-first foundation for turning research into
-reviewable product decisions. Version 0.4.2 adds conservative Semantic Scholar request pacing to the
-v0.4 provider/ingestion foundation and its small
-developer dry run while keeping the v0.3 records schema frozen.
+reviewable product decisions. Version 0.4.3 hardens provider authentication and request coordination
+in the v0.4 provider/ingestion foundation and its small developer dry run while keeping the v0.3
+records schema frozen.
 
 ## Core/project boundary
 
@@ -90,7 +90,7 @@ does not call an LLM.
 queries are recommended for evidence-focused searches. `LiteratureQuery.limit` is a per-provider
 limit, so `--limit 3 --semantic-scholar` may return up to six unique normalized sources before
 cross-provider deduplication. Broad semantic or exploratory discovery may be considered later but
-is not part of v0.4.2.
+is not part of v0.4.3.
 
 ```shell
 uv run research-atlas-dry-run "urban heat mitigation systematic review" --limit 8
@@ -108,10 +108,16 @@ set `RESEARCH_ATLAS_OPENALEX_API_KEY` or
 OpenAlex remains the primary provider and Semantic Scholar is an optional secondary provider.
 Provider searches are isolated: a throttled or unavailable secondary provider is reported in the
 dry-run output without discarding successful OpenAlex results. Discovery fails only when every
-configured provider fails. All requests made by one Semantic Scholar adapter instance, including
-retries and future endpoint methods, share an async client-side limiter with at least 1.1 seconds
-between request starts. This conservatively paces authenticated traffic below the approved
-1 request/second cumulative limit without applying Semantic Scholar's limit to OpenAlex.
+configured provider fails. All Semantic Scholar adapter instances in one Python process share an
+async request coordinator that reserves request-start slots at least 1.1 seconds apart. Retries and
+future endpoint methods routed through the adapter re-enter that same coordinator. Coordination is
+not distributed across OS processes or machines, so the current operational assumption is one
+active Semantic Scholar-using Research Atlas process per API key.
+
+OpenAlex sends its optional API key only as an `Authorization: Bearer` header. Its ordinary API
+keeps provider-appropriate retry/backoff behavior and is not subjected to Semantic Scholar's 1.1
+second throttle. Tighter endpoint-specific OpenAlex policies can be added if those endpoints are
+adopted; usage and daily-budget telemetry are a future operational improvement.
 
 Source IDs are UUID5 values over a canonical identity: DOI first, then PMID or arXiv, then provider
 namespace plus provider record ID. DOI URLs, `doi:` prefixes, case, and whitespace are normalized.

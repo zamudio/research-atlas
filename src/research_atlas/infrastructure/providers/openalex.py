@@ -52,11 +52,15 @@ class OpenAlexLiteratureSource:
             "cursor": "*",
             "select": self._select,
         }
-        if self._api_key:
-            params["api_key"] = self._api_key
+        headers = {"Authorization": f"Bearer {self._api_key}"} if self._api_key else None
         records: list[SourceRecord] = []
         while len(records) < query.limit:
-            response = await get_with_retries(client, f"{self.base_url}/works", params=params)
+            response = await get_with_retries(
+                client,
+                f"{self.base_url}/works",
+                params=params,
+                headers=headers,
+            )
             payload = cast(Mapping[str, object], response.json())
             results = payload.get("results", [])
             if not isinstance(results, list):

@@ -1,6 +1,5 @@
 import asyncio
 import json
-from itertools import pairwise
 from math import isclose
 
 import httpx
@@ -12,9 +11,10 @@ from research_atlas.application.discovery import (
     serialize_report,
 )
 from research_atlas.application.ports.literature_source import LiteratureQuery
+from research_atlas.infrastructure.providers import semantic_scholar
 from research_atlas.infrastructure.providers.semantic_scholar import (
     SEMANTIC_SCHOLAR_MINIMUM_INTERVAL_SECONDS,
-    AsyncRequestRateLimiter,
+    AsyncRequestCoordinator,
     SemanticScholarLiteratureSource,
 )
 
@@ -33,7 +33,14 @@ class FakeMonotonicClock:
     async def sleep(self, delay: float) -> None:
         self.delays.append(delay)
         self.advance(delay)
-        await asyncio.sleep(0)
+
+
+def isolated_coordinator(clock: FakeMonotonicClock) -> AsyncRequestCoordinator:
+    return AsyncRequestCoordinator(
+        SEMANTIC_SCHOLAR_MINIMUM_INTERVAL_SECONDS,
+        clock=clock,
+        sleep=clock.sleep,
+    )
 
 
 def assert_floats_close(actual: list[float], expected: list[float]) -> None:
@@ -68,10 +75,11 @@ def test_semantic_scholar_maps_mocked_paper() -> None:
         )
 
     async def run_search():
+        clock = FakeMonotonicClock()
         async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-            return await SemanticScholarLiteratureSource("secret", client).search(
-                LiteratureQuery("example topic", limit=5)
-            )
+            return await SemanticScholarLiteratureSource(
+                "secret", client, request_coordinator=isolated_coordinator(clock)
+            ).search(LiteratureQuery("example topic", limit=5))
 
     records = asyncio.run(run_search())
 
@@ -87,9 +95,16 @@ def test_semantic_scholar_maps_mocked_paper() -> None:
     }
 
 
-def test_back_to_back_requests_share_pacing_and_first_request_does_not_sleep() -> None:
+def test_two_default_instances_share_pacing_and_first_request_does_not_sleep(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     clock = FakeMonotonicClock()
     request_starts: list[float] = []
+    monkeypatch.setattr(
+        semantic_scholar,
+        "_DEFAULT_REQUEST_COORDINATOR",
+        isolated_coordinator(clock),
+    )
 
     def handler(_request: httpx.Request) -> httpx.Response:
         request_starts.append(clock())
@@ -97,14 +112,11 @@ def test_back_to_back_requests_share_pacing_and_first_request_does_not_sleep() -
 
     async def run_searches() -> None:
         async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-            source = SemanticScholarLiteratureSource(
-                client=client,
-                clock=clock,
-                sleep=clock.sleep,
-            )
-            await source.search(LiteratureQuery("first", limit=1))
+            first_source = SemanticScholarLiteratureSource(client=client)
+            second_source = SemanticScholarLiteratureSource(client=client)
+            await first_source.search(LiteratureQuery("first", limit=1))
             assert clock.delays == []
-            await source.search(LiteratureQuery("second", limit=1))
+            await second_source.search(LiteratureQuery("second", limit=1))
 
     asyncio.run(run_searches())
 
@@ -112,48 +124,70 @@ def test_back_to_back_requests_share_pacing_and_first_request_does_not_sleep() -
     assert_floats_close(clock.delays, [SEMANTIC_SCHOLAR_MINIMUM_INTERVAL_SECONDS])
 
 
-def test_concurrent_requests_are_serialized_and_paced() -> None:
-    clock = FakeMonotonicClock()
-    request_starts: list[float] = []
+def test_concurrent_requests_across_instances_reserve_separate_slots() -> None:
+    request_count = 0
 
     def handler(_request: httpx.Request) -> httpx.Response:
-        request_starts.append(clock())
+        nonlocal request_count
+        request_count += 1
         return httpx.Response(200, json={"data": []})
 
     async def run_searches() -> None:
+        delays: list[float] = []
+        reservations_ready = asyncio.Event()
+        release_sleepers = asyncio.Event()
+
+        async def deferred_sleep(delay: float) -> None:
+            delays.append(delay)
+            if len(delays) == 2:
+                reservations_ready.set()
+            await release_sleepers.wait()
+
         async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-            source = SemanticScholarLiteratureSource(
-                client=client,
-                clock=clock,
-                sleep=clock.sleep,
+            coordinator = AsyncRequestCoordinator(
+                SEMANTIC_SCHOLAR_MINIMUM_INTERVAL_SECONDS,
+                clock=lambda: 0.0,
+                sleep=deferred_sleep,
             )
-            await asyncio.gather(
-                source.search(LiteratureQuery("first", limit=1)),
-                source.search(LiteratureQuery("second", limit=1)),
-                source.search(LiteratureQuery("third", limit=1)),
+            sources = tuple(
+                SemanticScholarLiteratureSource(
+                    client=client,
+                    request_coordinator=coordinator,
+                )
+                for _ in range(3)
             )
+            searches = asyncio.gather(
+                *(source.search(LiteratureQuery("query", limit=1)) for source in sources)
+            )
+            await reservations_ready.wait()
+            assert request_count == 1
+            assert_floats_close(
+                delays,
+                [
+                    SEMANTIC_SCHOLAR_MINIMUM_INTERVAL_SECONDS,
+                    SEMANTIC_SCHOLAR_MINIMUM_INTERVAL_SECONDS * 2,
+                ],
+            )
+            release_sleepers.set()
+            await searches
 
     asyncio.run(run_searches())
 
-    interval = SEMANTIC_SCHOLAR_MINIMUM_INTERVAL_SECONDS
-    assert_floats_close(request_starts, [0.0, interval, interval * 2])
-    assert_floats_close(
-        [later - earlier for earlier, later in pairwise(request_starts)], [interval, interval]
-    )
+    assert request_count == 3
 
 
-def test_rate_limiter_uses_injected_monotonic_elapsed_time() -> None:
+def test_coordinator_uses_injected_monotonic_elapsed_time() -> None:
     clock = FakeMonotonicClock(now=100.0)
-    limiter = AsyncRequestRateLimiter(
+    coordinator = AsyncRequestCoordinator(
         SEMANTIC_SCHOLAR_MINIMUM_INTERVAL_SECONDS,
         clock=clock,
         sleep=clock.sleep,
     )
 
     async def acquire_twice() -> None:
-        await limiter.wait()
+        await coordinator.wait()
         clock.advance(0.4)
-        await limiter.wait()
+        await coordinator.wait()
 
     asyncio.run(acquire_twice())
 
@@ -161,7 +195,7 @@ def test_rate_limiter_uses_injected_monotonic_elapsed_time() -> None:
     assert isclose(clock(), 101.1)
 
 
-def test_retry_backoff_and_rate_limiter_compose() -> None:
+def test_retry_backoff_and_request_coordinator_compose() -> None:
     clock = FakeMonotonicClock()
     request_starts: list[float] = []
 
@@ -175,8 +209,7 @@ def test_retry_backoff_and_rate_limiter_compose() -> None:
         async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
             source = SemanticScholarLiteratureSource(
                 client=client,
-                clock=clock,
-                sleep=clock.sleep,
+                request_coordinator=isolated_coordinator(clock),
                 retry_sleep=clock.sleep,
             )
             await source.search(LiteratureQuery("retry me", limit=1))
@@ -197,8 +230,13 @@ def test_api_key_is_header_only_and_does_not_leak_into_provider_error() -> None:
         return httpx.Response(401)
 
     async def run_discovery() -> None:
+        clock = FakeMonotonicClock()
         async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-            source = SemanticScholarLiteratureSource(api_key, client)
+            source = SemanticScholarLiteratureSource(
+                api_key,
+                client,
+                request_coordinator=isolated_coordinator(clock),
+            )
             with pytest.raises(DiscoveryFailedError) as caught:
                 await DiscoverSources((source,)).execute(LiteratureQuery("safe query", limit=1))
             serialized = json.dumps(serialize_report(caught.value.report))
