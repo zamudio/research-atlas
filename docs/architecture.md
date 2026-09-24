@@ -24,7 +24,11 @@ one source may report multiple `StudyRecord` objects. Study findings are capture
 before cross-study synthesis.
 
 Literature discovery is async because OpenAlex and Semantic Scholar are independent network calls;
-the application service can execute them concurrently while exposing one consistent port. The
+the application service executes them concurrently while exposing one consistent port. Each
+provider outcome is reported independently, partial success preserves available results, and a
+discovery fails only when all configured providers fail. Query text passes through to provider
+search syntax unchanged, and the query limit applies to each provider rather than globally; all
+unique results remain after exact-identity deduplication. The
 read-only Zotero reference-library port remains synchronous because `pyzotero` is synchronous.
 Raw response types are contained in adapters and never enter application or domain contracts.
 

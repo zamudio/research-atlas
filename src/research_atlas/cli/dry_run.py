@@ -6,7 +6,11 @@ import json
 from collections.abc import Sequence
 from pathlib import Path
 
-from research_atlas.application.discovery import DiscoverSources, serialize_sources
+from research_atlas.application.discovery import (
+    DiscoverSources,
+    DiscoveryFailedError,
+    serialize_report,
+)
 from research_atlas.application.ports.literature_source import LiteratureQuery, LiteratureSource
 from research_atlas.infrastructure.config import ProviderSettings
 from research_atlas.infrastructure.providers.openalex import OpenAlexLiteratureSource
@@ -36,20 +40,25 @@ async def run_dry_run(
     providers: list[LiteratureSource] = [OpenAlexLiteratureSource(settings.openalex_api_key)]
     if include_semantic_scholar:
         providers.append(SemanticScholarLiteratureSource(settings.semantic_scholar_api_key))
-    records = await DiscoverSources(providers).execute(LiteratureQuery(query_text, limit=limit))
-    return json.dumps(serialize_sources(records), indent=2, sort_keys=True) + "\n"
+    report = await DiscoverSources(providers).execute(LiteratureQuery(query_text, limit=limit))
+    return json.dumps(serialize_report(report), indent=2, sort_keys=True) + "\n"
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = _parser().parse_args(argv)
-    output = asyncio.run(
-        run_dry_run(
-            args.query,
-            limit=args.limit,
-            include_semantic_scholar=args.semantic_scholar,
-            settings=ProviderSettings(),
+    try:
+        output = asyncio.run(
+            run_dry_run(
+                args.query,
+                limit=args.limit,
+                include_semantic_scholar=args.semantic_scholar,
+                settings=ProviderSettings(),
+            )
         )
-    )
+    except DiscoveryFailedError as error:
+        print(json.dumps(serialize_report(error.report), indent=2, sort_keys=True))
+        print(str(error))
+        return 1
     if args.output:
         args.output.parent.mkdir(parents=True, exist_ok=True)
         args.output.write_text(output, encoding="utf-8")

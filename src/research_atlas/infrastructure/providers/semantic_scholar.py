@@ -17,6 +17,7 @@ class SemanticScholarLiteratureSource:
 
     base_url = "https://api.semanticscholar.org/graph/v1"
     _fields = "paperId,externalIds,title,authors,year,url,publicationTypes,venue"
+    provider_id = "semantic_scholar"
 
     def __init__(self, api_key: str | None = None, client: httpx.AsyncClient | None = None) -> None:
         self._api_key = api_key

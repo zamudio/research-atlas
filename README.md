@@ -1,7 +1,8 @@
 # Research Atlas
 
 Research Atlas is a reusable, provenance-first foundation for turning research into
-reviewable product decisions. Version 0.4 adds a provider/ingestion foundation and a small
+reviewable product decisions. Version 0.4.1 adds reliable partial-provider reporting to the
+v0.4 provider/ingestion foundation and its small
 developer dry run while keeping the v0.3 records schema frozen.
 
 ## What it is
@@ -60,6 +61,12 @@ Raw PDFs, corpora, provider dumps, and generated exports are intentionally ignor
 The dry run discovers and normalizes 1–10 publications. It does not create `ResearchRun`, study,
 finding, evidence, architecture, or product records, and it does not call an LLM.
 
+`LiteratureQuery.query` is passed through as provider search syntax; precise phrase and Boolean
+queries are recommended for evidence-focused searches. `LiteratureQuery.limit` is a per-provider
+limit, so `--limit 3 --semantic-scholar` may return up to six unique normalized sources before
+cross-provider deduplication. Broad semantic or exploratory discovery may be considered later but
+is not part of v0.4.1.
+
 ```shell
 uv run research-atlas-dry-run "formative feedback intelligent tutoring" --limit 8
 uv run research-atlas-dry-run "formative feedback" --limit 5 --semantic-scholar
@@ -72,6 +79,11 @@ set `RESEARCH_ATLAS_OPENALEX_API_KEY` or
 `RESEARCH_ATLAS_ZOTERO_LIBRARY_ID`, `RESEARCH_ATLAS_ZOTERO_LIBRARY_TYPE` (`user` or
 `group`), and an API key where the library requires one. The Zotero adapter is read-only and uses
 `pyzotero`.
+
+OpenAlex remains the primary provider and Semantic Scholar is an optional secondary provider.
+Provider searches are isolated: a throttled or unavailable secondary provider is reported in the
+dry-run output without discarding successful OpenAlex results. Discovery fails only when every
+configured provider fails.
 
 Source IDs are UUID5 values over a canonical identity: DOI first, then PMID or arXiv, then provider
 namespace plus provider record ID. DOI URLs, `doi:` prefixes, case, and whitespace are normalized.

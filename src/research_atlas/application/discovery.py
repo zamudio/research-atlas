@@ -2,14 +2,19 @@
 
 import asyncio
 from collections.abc import Sequence
+from dataclasses import dataclass
 from typing import TypedDict
 
-from research_atlas.application.ports.literature_source import LiteratureQuery, LiteratureSource
+from research_atlas.application.ports.literature_source import (
+    LiteratureQuery,
+    LiteratureSource,
+    LiteratureSourceError,
+)
 from research_atlas.application.source_identity import canonical_identity, merge_sources
 from research_atlas.domain.studies import SourceRecord
 
 
-class DiscoveryResult(TypedDict):
+class SerializedSource(TypedDict):
     source_id: str
     title: str
     authors: list[str]
@@ -21,17 +26,77 @@ class DiscoveryResult(TypedDict):
     merged_across_providers: bool
 
 
+class SerializedProviderOutcome(TypedDict):
+    provider: str
+    success: bool
+    raw_result_count: int | None
+    error_type: str | None
+    status_code: int | None
+    error_message: str | None
+
+
+class SerializedDiscoveryReport(TypedDict):
+    query: str
+    provider_outcomes: list[SerializedProviderOutcome]
+    normalized_source_count: int
+    cross_provider_merge_count: int
+    sources: list[SerializedSource]
+
+
+@dataclass(frozen=True, slots=True)
+class ProviderOutcome:
+    """Provider-neutral health and result-count information for one search."""
+
+    provider: str
+    success: bool
+    raw_result_count: int | None = None
+    error_type: str | None = None
+    status_code: int | None = None
+    error_message: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class DiscoveryReport:
+    """Normalized sources and observable outcomes from every configured provider."""
+
+    query: str
+    sources: tuple[SourceRecord, ...]
+    provider_outcomes: tuple[ProviderOutcome, ...]
+
+
+class DiscoveryFailedError(RuntimeError):
+    """Raised when no configured provider completed successfully."""
+
+    def __init__(self, report: DiscoveryReport) -> None:
+        self.report = report
+        providers = ", ".join(outcome.provider for outcome in report.provider_outcomes)
+        super().__init__(f"all literature providers failed for query {report.query!r}: {providers}")
+
+
+@dataclass(frozen=True, slots=True)
+class _ProviderSearchResult:
+    outcome: ProviderOutcome
+    records: tuple[SourceRecord, ...]
+
+
 class DiscoverSources:
-    """Search providers concurrently, then normalize their exact stable identities."""
+    """Search providers independently, then normalize their exact stable identities."""
 
     def __init__(self, providers: Sequence[LiteratureSource]) -> None:
         if not providers:
             raise ValueError("at least one literature provider is required")
         self._providers = tuple(providers)
 
-    async def execute(self, query: LiteratureQuery) -> tuple[SourceRecord, ...]:
-        results = await asyncio.gather(*(provider.search(query) for provider in self._providers))
-        discovered = tuple(record for provider_records in results for record in provider_records)
+    async def execute(self, query: LiteratureQuery) -> DiscoveryReport:
+        """Return all unique results, treating ``query.limit`` as a per-provider limit."""
+
+        results = await asyncio.gather(
+            *(self._search_provider(provider, query) for provider in self._providers)
+        )
+        outcomes = tuple(result.outcome for result in results)
+        discovered = tuple(record for result in results for record in result.records)
+        if not any(outcome.success for outcome in outcomes):
+            raise DiscoveryFailedError(DiscoveryReport(query.query, (), outcomes))
         merged = merge_sources(discovered)
         by_identity = {
             canonical_identity(record.external_identifiers, record.provider_provenance): record
@@ -41,10 +106,43 @@ class DiscoverSources:
             canonical_identity(record.external_identifiers, record.provider_provenance)
             for record in discovered
         )
-        return tuple(by_identity[identity] for identity in relevance_order)[: query.limit]
+        sources = tuple(by_identity[identity] for identity in relevance_order)
+        return DiscoveryReport(query.query, sources, outcomes)
+
+    @staticmethod
+    async def _search_provider(
+        provider: LiteratureSource, query: LiteratureQuery
+    ) -> _ProviderSearchResult:
+        try:
+            records = await provider.search(query)
+        except Exception as error:
+            if isinstance(error, LiteratureSourceError):
+                error_type = error.error_type
+                status_code = error.status_code
+            else:
+                error_type = type(error).__name__
+                status_code = None
+            return _ProviderSearchResult(
+                ProviderOutcome(
+                    provider=provider.provider_id,
+                    success=False,
+                    error_type=error_type,
+                    status_code=status_code,
+                    error_message=str(error),
+                ),
+                (),
+            )
+        return _ProviderSearchResult(
+            ProviderOutcome(
+                provider=provider.provider_id,
+                success=True,
+                raw_result_count=len(records),
+            ),
+            records,
+        )
 
 
-def serialize_source(record: SourceRecord) -> DiscoveryResult:
+def serialize_source(record: SourceRecord) -> SerializedSource:
     """Create stable, human-reviewable dry-run output without research-run records."""
 
     identifiers: dict[str, list[str]] = {}
@@ -71,5 +169,30 @@ def serialize_source(record: SourceRecord) -> DiscoveryResult:
     }
 
 
-def serialize_sources(records: Sequence[SourceRecord]) -> list[DiscoveryResult]:
+def serialize_sources(records: Sequence[SourceRecord]) -> list[SerializedSource]:
     return [serialize_source(record) for record in records]
+
+
+def serialize_report(report: DiscoveryReport) -> SerializedDiscoveryReport:
+    """Serialize provider health and normalized sources for a dry-run review."""
+
+    return {
+        "query": report.query,
+        "provider_outcomes": [
+            {
+                "provider": outcome.provider,
+                "success": outcome.success,
+                "raw_result_count": outcome.raw_result_count,
+                "error_type": outcome.error_type,
+                "status_code": outcome.status_code,
+                "error_message": outcome.error_message,
+            }
+            for outcome in report.provider_outcomes
+        ],
+        "normalized_source_count": len(report.sources),
+        "cross_provider_merge_count": sum(
+            len({item.provider for item in source.provider_provenance}) > 1
+            for source in report.sources
+        ),
+        "sources": serialize_sources(report.sources),
+    }
