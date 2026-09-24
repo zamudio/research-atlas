@@ -1,8 +1,8 @@
 # Research Workbench
 
 Research Workbench is a reusable, provenance-first foundation for turning research into
-reviewable product decisions. Version 0.3.1 completes the pre-integration export-integrity pass;
-it does not perform literature searches or connect to providers.
+reviewable product decisions. Version 0.4 adds a provider/ingestion foundation and a small
+developer dry run while keeping the v0.3 records schema frozen.
 
 ## What it is
 
@@ -17,10 +17,11 @@ it does not perform literature searches or connect to providers.
 It is not a paper database replacement, an Elicit clone, a scientific authority, a web UI, an
 agent framework, or a claim that qualitative review can be reduced to one universal score.
 
-Zotero, Elicit, OpenAlex, Semantic Scholar, ResearchRabbit, Litmaps, and similar tools are useful
-infrastructure. Future adapters may acquire records through them, but provider-specific models
-must stop at application-owned ports. The normalized records and documented review decisions in
-this repository are the internal source of truth.
+OpenAlex is the primary programmatic discovery provider, Semantic Scholar is a secondary
+discovery/enrichment provider, and Zotero is the canonical reference library. Provider-specific
+models stop at application-owned ports. Elicit free/basic may be used manually, but automated
+Elicit integration is deferred: this project does not scrape or browser-automate around plan or
+API limits. A future Elicit export or API importer can use the same ingestion boundary.
 
 Consumer projects such as AI Tutor receive curated exports. They do not import or run Research
 Workbench in production.
@@ -45,11 +46,37 @@ manifest's project ID, protocol versions, and taxonomy version.
 - `src/research_workbench/domain`: trusted internal dataclasses.
 - `src/research_workbench/schemas`: validated import, configuration, and record boundaries.
 - `src/research_workbench/application/ports`: provider-neutral acquisition interfaces.
+- `src/research_workbench/application/source_identity.py`: stable identity and exact-ID merging.
+- `src/research_workbench/infrastructure/providers`: OpenAlex, Semantic Scholar, and Zotero
+  adapters.
 - `src/research_workbench/application/export`: static bundle contracts and checksums.
 - `protocol`: independently versioned taxonomy, extraction, evidence, and promotion guidance.
 - `templates`: example project profiles; these do not start a research run.
 
 Raw PDFs, corpora, provider dumps, and generated exports are intentionally ignored by Git.
+
+## Provider dry run
+
+The dry run discovers and normalizes 1–10 publications. It does not create `ResearchRun`, study,
+finding, evidence, architecture, or product records, and it does not call an LLM.
+
+```shell
+uv run research-workbench-dry-run "formative feedback intelligent tutoring" --limit 8
+uv run research-workbench-dry-run "formative feedback" --limit 5 --semantic-scholar
+uv run research-workbench-dry-run "formative feedback" --output tmp/dry-run.json
+```
+
+OpenAlex and Semantic Scholar keys are optional for small calls. Copy `.env.example` to `.env` to
+set `RESEARCH_WORKBENCH_OPENALEX_API_KEY` or
+`RESEARCH_WORKBENCH_SEMANTIC_SCHOLAR_API_KEY`. Zotero access requires
+`RESEARCH_WORKBENCH_ZOTERO_LIBRARY_ID`, `RESEARCH_WORKBENCH_ZOTERO_LIBRARY_TYPE` (`user` or
+`group`), and an API key where the library requires one. The Zotero adapter is read-only and uses
+`pyzotero`.
+
+Source IDs are UUID5 values over a canonical identity: DOI first, then PMID or arXiv, then provider
+namespace plus provider record ID. DOI URLs, `doi:` prefixes, case, and whitespace are normalized.
+Records merge only when these stable identities match; similar titles, authors, or years are kept
+separate in v0.4. Provider provenance and external identifiers are combined deterministically.
 
 ## Development
 
@@ -63,6 +90,5 @@ uv run ruff format --check .
 uv run pyright
 ```
 
-Research Run 001 has not been started. The core schema is intended to remain frozen through Run
-001 unless real data demonstrates a necessary change. Provider adapters remain outside the v0.3
-hardening scope.
+Research Run 001 has not been started. This dry run is explicitly not Run 001. The records schema
+remains 0.3, and protocol and taxonomy versions are unchanged.

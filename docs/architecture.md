@@ -5,7 +5,9 @@ Research Workbench uses a small ports-and-domain boundary.
 ```text
 external tools/providers
         |
-application-owned ports (future adapters)
+infrastructure adapters (OpenAlex / Semantic Scholar / Zotero)
+        |
+application-owned ports + discovery/identity service
         |
 Pydantic import boundaries
         |
@@ -20,6 +22,17 @@ The domain does not import provider SDKs or consumer code. Provider identifiers 
 provenance, not primary identity. Application ports discover or retrieve `SourceRecord` objects;
 one source may report multiple `StudyRecord` objects. Study findings are captured independently
 before cross-study synthesis.
+
+Literature discovery is async because OpenAlex and Semantic Scholar are independent network calls;
+the application service can execute them concurrently while exposing one consistent port. The
+read-only Zotero reference-library port remains synchronous because `pyzotero` is synchronous.
+Raw response types are contained in adapters and never enter application or domain contracts.
+
+Canonical scholarly identity is DOI, then PMID or arXiv, then provider namespace plus provider
+record ID. Internal source UUIDs are UUID5 values over that identity. Deduplication merges only an
+exact normalized stable identity and deterministically unions external identifiers and provider
+provenance. It intentionally does not use fuzzy title/author/year matching, so uncertain records
+remain separate for human review.
 
 ```text
 SourceRecord
@@ -55,5 +68,8 @@ different rate. Exports are immutable artifacts whose content files may be verif
 checksums.
 
 Raw PDFs, large corpora, provider dumps, and temporary outputs stay in external or ignored storage.
-No database, UI, agent framework, LLM pipeline, provider adapter, or consumer integration is part
-of v0.3. Research Run 001 has not started.
+The v0.4 dry-run command emits only normalized source metadata to stdout or an ignored `tmp/` or
+`exports/` path. It creates no research-run or downstream research records and invokes no LLM.
+Elicit remains a manual tool on the free/basic tier; any later export/API adapter can enter through
+the existing ports, with no scraping or browser automation around service limits. Research Run 001
+has not started. Records schema 0.3 and all protocol and taxonomy versions remain frozen.
