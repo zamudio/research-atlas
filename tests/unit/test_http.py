@@ -73,3 +73,26 @@ def test_exhausted_retries_surface_http_error() -> None:
         assert "example.test" not in str(error)
     else:
         raise AssertionError("exhausted retries did not surface a provider-neutral error")
+
+
+def test_transport_error_details_are_not_surfaced() -> None:
+    sensitive_detail = "request headers contained a sensitive value"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError(sensitive_detail, request=request)
+
+    async def sleep(_delay: float) -> None:
+        pass
+
+    async def run_request() -> None:
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            await get_with_retries(client, "https://example.test", params={}, sleep=sleep)
+
+    try:
+        asyncio.run(run_request())
+    except LiteratureSourceError as error:
+        assert error.error_type == "transport_error"
+        assert str(error) == "provider request failed due to a transport error"
+        assert sensitive_detail not in str(error)
+    else:
+        raise AssertionError("exhausted retries did not surface a provider-neutral error")

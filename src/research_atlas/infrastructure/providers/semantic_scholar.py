@@ -1,7 +1,9 @@
 """Semantic Scholar discovery/enrichment adapter."""
 
-from collections.abc import Mapping
+import asyncio
+from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
+from time import monotonic
 from typing import cast
 
 import httpx
@@ -9,7 +11,40 @@ import httpx
 from research_atlas.application.ports.literature_source import LiteratureQuery
 from research_atlas.application.source_identity import identified_source
 from research_atlas.domain.studies import ExternalIdentifier, SourceProvenance, SourceRecord
-from research_atlas.infrastructure.providers._http import get_with_retries
+from research_atlas.infrastructure.providers._http import Sleep, get_with_retries
+
+SEMANTIC_SCHOLAR_MINIMUM_INTERVAL_SECONDS = 1.1
+
+
+class AsyncRequestRateLimiter:
+    """Serialize request starts with an async, monotonic minimum interval."""
+
+    def __init__(
+        self,
+        minimum_interval_seconds: float,
+        *,
+        clock: Callable[[], float] = monotonic,
+        sleep: Sleep = asyncio.sleep,
+    ) -> None:
+        if minimum_interval_seconds <= 0:
+            raise ValueError("minimum interval must be positive")
+        self._minimum_interval_seconds = minimum_interval_seconds
+        self._clock = clock
+        self._sleep = sleep
+        self._lock = asyncio.Lock()
+        self._last_started_at: float | None = None
+
+    async def wait(self) -> None:
+        """Wait until the next request may start, then reserve that start time."""
+
+        async with self._lock:
+            now = self._clock()
+            if self._last_started_at is not None:
+                remaining = self._minimum_interval_seconds - (now - self._last_started_at)
+                if remaining > 0:
+                    await self._sleep(remaining)
+                    now = self._clock()
+            self._last_started_at = now
 
 
 class SemanticScholarLiteratureSource:
@@ -19,9 +54,23 @@ class SemanticScholarLiteratureSource:
     _fields = "paperId,externalIds,title,authors,year,url,publicationTypes,venue"
     provider_id = "semantic_scholar"
 
-    def __init__(self, api_key: str | None = None, client: httpx.AsyncClient | None = None) -> None:
+    def __init__(
+        self,
+        api_key: str | None = None,
+        client: httpx.AsyncClient | None = None,
+        *,
+        clock: Callable[[], float] = monotonic,
+        sleep: Sleep = asyncio.sleep,
+        retry_sleep: Sleep = asyncio.sleep,
+    ) -> None:
         self._api_key = api_key
         self._client = client
+        self._rate_limiter = AsyncRequestRateLimiter(
+            SEMANTIC_SCHOLAR_MINIMUM_INTERVAL_SECONDS,
+            clock=clock,
+            sleep=sleep,
+        )
+        self._retry_sleep = retry_sleep
 
     async def search(self, query: LiteratureQuery) -> tuple[SourceRecord, ...]:
         if query.limit < 1:
@@ -34,12 +83,10 @@ class SemanticScholarLiteratureSource:
     async def _search(
         self, client: httpx.AsyncClient, query: LiteratureQuery
     ) -> tuple[SourceRecord, ...]:
-        headers = {"x-api-key": self._api_key} if self._api_key else None
-        response = await get_with_retries(
+        response = await self._get(
             client,
             f"{self.base_url}/paper/search",
             params={"query": query.query, "limit": min(query.limit, 100), "fields": self._fields},
-            headers=headers,
         )
         payload = cast(Mapping[str, object], response.json())
         data = payload.get("data", [])
@@ -49,6 +96,25 @@ class SemanticScholarLiteratureSource:
             self._map_paper(cast(Mapping[str, object], paper))
             for paper in cast(list[object], data)[: query.limit]
             if isinstance(paper, Mapping)
+        )
+
+    async def _get(
+        self,
+        client: httpx.AsyncClient,
+        url: str,
+        *,
+        params: Mapping[str, str | int],
+    ) -> httpx.Response:
+        """Issue one S2 GET with shared authentication, retries, and request pacing."""
+
+        headers = {"x-api-key": self._api_key} if self._api_key else None
+        return await get_with_retries(
+            client,
+            url,
+            params=params,
+            headers=headers,
+            sleep=self._retry_sleep,
+            before_request=self._rate_limiter.wait,
         )
 
     @staticmethod

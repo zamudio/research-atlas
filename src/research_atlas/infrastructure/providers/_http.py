@@ -10,6 +10,7 @@ import httpx
 from research_atlas.application.ports.literature_source import LiteratureSourceError
 
 Sleep = Callable[[float], Awaitable[None]]
+BeforeRequest = Callable[[], Awaitable[None]]
 
 
 def _retry_delay(retry_after: str | None, attempt: int) -> float:
@@ -35,17 +36,23 @@ async def get_with_retries(
     headers: Mapping[str, str] | None = None,
     attempts: int = 3,
     sleep: Sleep = asyncio.sleep,
+    before_request: BeforeRequest | None = None,
 ) -> httpx.Response:
     """Retry rate limits, transient server responses, and transport failures."""
 
     last_error: httpx.TransportError | None = None
     for attempt in range(attempts):
+        if before_request is not None:
+            await before_request()
         try:
             response = await client.get(url, params=params, headers=headers)
         except httpx.TransportError as error:
             last_error = error
             if attempt + 1 == attempts:
-                raise LiteratureSourceError(str(error), error_type="transport_error") from error
+                raise LiteratureSourceError(
+                    "provider request failed due to a transport error",
+                    error_type="transport_error",
+                ) from error
             await sleep(_retry_delay(None, attempt))
             continue
         if response.status_code != 429 and response.status_code < 500:
@@ -71,5 +78,8 @@ async def get_with_retries(
                 ) from error
         await sleep(_retry_delay(response.headers.get("Retry-After"), attempt))
     if last_error is not None:
-        raise LiteratureSourceError(str(last_error), error_type="transport_error") from last_error
+        raise LiteratureSourceError(
+            "provider request failed due to a transport error",
+            error_type="transport_error",
+        ) from last_error
     raise RuntimeError("provider request retry loop ended unexpectedly")
