@@ -124,6 +124,32 @@ class ExportBundle(BaseModel):
                 "manifest counts must match records; "
                 f"expected {expected_counts.model_dump()}, got {self.manifest.counts.model_dump()}"
             )
+
+        runs_by_id = {run.run_id: run for run in self.records.research_runs}
+        missing_run_ids = [
+            run_id for run_id in self.manifest.contributing_run_ids if run_id not in runs_by_id
+        ]
+        if missing_run_ids:
+            raise ValueError(
+                "manifest contributing_run_ids reference missing ResearchRun IDs: "
+                f"{missing_run_ids}"
+            )
+
+        run_metadata_errors: list[str] = []
+        for run_id in self.manifest.contributing_run_ids:
+            run = runs_by_id[run_id]
+            for field_name, run_value, manifest_value in (
+                ("project_id", run.project_id, self.manifest.project_id),
+                ("protocol_versions", run.protocol_versions, self.manifest.protocol_versions),
+                ("taxonomy_version", run.taxonomy_version, self.manifest.taxonomy_version),
+            ):
+                if run_value != manifest_value:
+                    run_metadata_errors.append(
+                        f"contributing ResearchRun {run_id} {field_name} must match manifest "
+                        f"{field_name}; expected {manifest_value!r}, got {run_value!r}"
+                    )
+        if run_metadata_errors:
+            raise ValueError("; ".join(run_metadata_errors))
         return self
 
 

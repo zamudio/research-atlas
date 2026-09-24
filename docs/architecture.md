@@ -45,6 +45,8 @@ states. The centralized boundary rejects provenance that names a run absent from
 `ResearchRecords` is the centralized referential-integrity boundary. It rejects duplicate IDs and
 dangling typed links before trusted dataclasses enter the application. Export counts are derived
 from those validated collections and checked against the manifest when a bundle is assembled.
+Every contributing run named by an export manifest must be present in the bundled records and must
+match the manifest's project ID, protocol versions, and taxonomy version.
 
 Extraction, evidence-assessment, and architecture-promotion protocol components have explicit,
 independent versions in research runs and export manifests. Taxonomies, construct registries,

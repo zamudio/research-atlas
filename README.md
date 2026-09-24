@@ -1,8 +1,8 @@
 # Research Workbench
 
 Research Workbench is a reusable, provenance-first foundation for turning research into
-reviewable product decisions. Version 0.3 completes the core-schema hardening pass; it does not
-perform literature searches or connect to providers.
+reviewable product decisions. Version 0.3.1 completes the pre-integration export-integrity pass;
+it does not perform literature searches or connect to providers.
 
 ## What it is
 
@@ -36,6 +36,9 @@ Workbench in production.
    constructs.
 6. Review architecture candidates and product implications.
 7. Publish a checksummed, versioned static export bundle.
+
+Export manifests are accepted only when every contributing run is bundled and matches the
+manifest's project ID, protocol versions, and taxonomy version.
 
 ## Repository map
 

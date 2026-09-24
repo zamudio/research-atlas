@@ -1,4 +1,4 @@
-from dataclasses import fields
+from dataclasses import fields, replace
 from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
@@ -212,6 +212,21 @@ def representative_records() -> ResearchRecords:
     )
 
 
+def representative_manifest(records: ResearchRecords) -> ExportBundleManifest:
+    return ExportBundleManifest.for_records(
+        records,
+        bundle_id="contract-test-0.3",
+        generated_at=NOW,
+        project_id="contract-test",
+        protocol_versions=PROTOCOL_VERSIONS,
+        taxonomy_version="0.1",
+        contributing_run_ids=("run-contract-test",),
+        construct_registry_version="0.3",
+        research_questions=("What supports durable learning?",),
+        content_files=(ContentFile(path="records.json", sha256="a" * 64),),
+    )
+
+
 def test_one_source_can_report_multiple_studies() -> None:
     records = representative_records()
 
@@ -366,24 +381,100 @@ def test_dangling_references_are_rejected(
         ResearchRecords.model_validate(payload)
 
 
-def test_export_counts_are_derived_and_cannot_disagree() -> None:
+def test_valid_export_bundle_with_existing_contributing_run_succeeds() -> None:
     records = representative_records()
-    manifest = ExportBundleManifest.for_records(
-        records,
-        bundle_id="contract-test-0.3",
-        generated_at=NOW,
-        project_id="contract-test",
-        protocol_versions=PROTOCOL_VERSIONS,
-        taxonomy_version="0.1",
-        contributing_run_ids=(),
-        construct_registry_version="0.3",
-        research_questions=("What supports durable learning?",),
-        content_files=(ContentFile(path="records.json", sha256="a" * 64),),
+    manifest = representative_manifest(records)
+
+    bundle = ExportBundle(manifest=manifest, records=records)
+
+    assert bundle.manifest.contributing_run_ids == (records.research_runs[0].run_id,)
+
+
+def test_export_bundle_rejects_nonexistent_contributing_run() -> None:
+    records = representative_records()
+    manifest_payload = representative_manifest(records).model_dump(mode="json")
+    manifest_payload["contributing_run_ids"] = ["missing-run"]
+
+    with pytest.raises(
+        ValidationError,
+        match=r"manifest contributing_run_ids reference missing ResearchRun IDs.*missing-run",
+    ):
+        ExportBundle.model_validate({"manifest": manifest_payload, "records": records})
+
+
+def test_export_bundle_rejects_contributing_run_project_mismatch() -> None:
+    records = representative_records()
+    mismatched_records = records.model_copy(
+        update={
+            "research_runs": (replace(records.research_runs[0], project_id="different-project"),)
+        }
     )
 
+    with pytest.raises(
+        ValidationError,
+        match=(
+            r"contributing ResearchRun run-contract-test project_id must match manifest project_id"
+        ),
+    ):
+        ExportBundle(manifest=representative_manifest(records), records=mismatched_records)
+
+
+def test_export_bundle_rejects_contributing_run_protocol_versions_mismatch() -> None:
+    records = representative_records()
+    mismatched_records = records.model_copy(
+        update={
+            "research_runs": (
+                replace(
+                    records.research_runs[0],
+                    protocol_versions=replace(PROTOCOL_VERSIONS, extraction="different"),
+                ),
+            )
+        }
+    )
+
+    with pytest.raises(
+        ValidationError,
+        match=(
+            r"contributing ResearchRun run-contract-test protocol_versions must match manifest "
+            r"protocol_versions"
+        ),
+    ):
+        ExportBundle(manifest=representative_manifest(records), records=mismatched_records)
+
+
+def test_export_bundle_rejects_contributing_run_taxonomy_version_mismatch() -> None:
+    records = representative_records()
+    mismatched_records = records.model_copy(
+        update={"research_runs": (replace(records.research_runs[0], taxonomy_version="different"),)}
+    )
+
+    with pytest.raises(
+        ValidationError,
+        match=(
+            r"contributing ResearchRun run-contract-test taxonomy_version must match manifest "
+            r"taxonomy_version"
+        ),
+    ):
+        ExportBundle(manifest=representative_manifest(records), records=mismatched_records)
+
+
+def test_export_bundle_rejects_schema_version_mismatch() -> None:
+    records = representative_records()
+    manifest_payload = representative_manifest(records).model_dump(mode="json")
+    manifest_payload["schema_version"] = "different"
+
+    with pytest.raises(
+        ValidationError,
+        match="manifest schema_version must match records schema_version",
+    ):
+        ExportBundle.model_validate({"manifest": manifest_payload, "records": records})
+
+
+def test_export_counts_are_derived_and_cannot_disagree() -> None:
+    records = representative_records()
+    manifest = representative_manifest(records)
+
     assert manifest.counts == ExportCounts.from_records(records)
-    bundle = ExportBundle(manifest=manifest, records=records)
-    assert ExportBundle.model_validate_json(bundle.model_dump_json()) == bundle
 
     bad_manifest = manifest.model_dump(mode="json")
     bad_manifest["counts"]["findings"] = 99
@@ -394,6 +485,13 @@ def test_export_counts_are_derived_and_cannot_disagree() -> None:
     del incomplete_manifest["protocol_versions"]
     with pytest.raises(ValidationError):
         ExportBundleManifest.model_validate(incomplete_manifest)
+
+
+def test_valid_export_bundle_round_trips_json() -> None:
+    records = representative_records()
+    bundle = ExportBundle(manifest=representative_manifest(records), records=records)
+
+    assert ExportBundle.model_validate_json(bundle.model_dump_json()) == bundle
 
 
 def test_protocol_versions_round_trip_through_run_and_manifest() -> None:
