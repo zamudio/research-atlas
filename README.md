@@ -1,8 +1,8 @@
 # Research Workbench
 
 Research Workbench is a reusable, provenance-first foundation for turning research into
-reviewable product decisions. Version 0.2 hardens the core contracts; it does not perform
-literature searches or connect to providers.
+reviewable product decisions. Version 0.3 completes the core-schema hardening pass; it does not
+perform literature searches or connect to providers.
 
 ## What it is
 
@@ -30,8 +30,10 @@ Workbench in production.
 1. Define a consumer-aware `ProjectProfile`.
 2. Conduct versioned research runs using an approved protocol and taxonomy.
 3. Normalize publications into source records, then separate studies or analyses.
-4. Extract measurements, interventions, and study-level findings with process provenance.
-5. Maintain a construct registry and synthesize findings into evidence assessments.
+4. Extract studies, constructs, measurements, interventions, and study-level findings with required
+   process provenance tied to the creating research run.
+5. Synthesize findings into claim-centered evidence assessments, optionally linking relevant
+   constructs.
 6. Review architecture candidates and product implications.
 7. Publish a checksummed, versioned static export bundle.
 
@@ -58,4 +60,6 @@ uv run ruff format --check .
 uv run pyright
 ```
 
-Research Run 001 has not been started. Provider adapters remain outside the v0.2 hardening scope.
+Research Run 001 has not been started. The core schema is intended to remain frozen through Run
+001 unless real data demonstrates a necessary change. Provider adapters remain outside the v0.3
+hardening scope.

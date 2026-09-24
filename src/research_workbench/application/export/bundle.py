@@ -7,6 +7,7 @@ from typing import Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from research_workbench.domain.versioning import ProtocolVersions
 from research_workbench.schemas.research_records import ResearchRecords
 
 
@@ -63,7 +64,7 @@ class ExportBundleManifest(BaseModel):
     bundle_id: str
     generated_at: datetime
     project_id: str
-    protocol_version: str
+    protocol_versions: ProtocolVersions
     taxonomy_version: str
     contributing_run_ids: tuple[str, ...]
     counts: ExportCounts
@@ -79,7 +80,7 @@ class ExportBundleManifest(BaseModel):
         bundle_id: str,
         generated_at: datetime,
         project_id: str,
-        protocol_version: str,
+        protocol_versions: ProtocolVersions,
         taxonomy_version: str,
         contributing_run_ids: tuple[str, ...],
         construct_registry_version: str,
@@ -93,7 +94,7 @@ class ExportBundleManifest(BaseModel):
             bundle_id=bundle_id,
             generated_at=generated_at,
             project_id=project_id,
-            protocol_version=protocol_version,
+            protocol_versions=protocol_versions,
             taxonomy_version=taxonomy_version,
             contributing_run_ids=contributing_run_ids,
             counts=ExportCounts.from_records(records),

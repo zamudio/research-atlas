@@ -13,6 +13,8 @@ class RecordProvenance:
     extraction_method: str
     tool_name: str | None = None
     tool_version: str | None = None
+    model_name: str | None = None
+    model_version: str | None = None
     reviewer: str | None = None
     review_status: str | None = None
     reviewed_at: datetime | None = None

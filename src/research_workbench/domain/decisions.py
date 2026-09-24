@@ -1,7 +1,6 @@
 """Research-to-product decision records."""
 
 from dataclasses import dataclass
-from uuid import UUID
 
 from research_workbench.domain.provenance import RecordProvenance
 
@@ -11,7 +10,6 @@ class ArchitectureCandidate:
     """A reviewable proposal to use research in a product architecture."""
 
     candidate_id: str
-    subject_id: str
     observable_by_product: str
     proposed_raw_signals: tuple[str, ...]
     inference_risks: tuple[str, ...]
@@ -21,8 +19,8 @@ class ArchitectureCandidate:
     confidence: str
     status: str
     linked_evidence_ids: tuple[str, ...]
-    linked_study_ids: tuple[UUID, ...]
-    record_provenance: RecordProvenance | None = None
+    record_provenance: RecordProvenance
+    linked_construct_ids: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -36,5 +34,4 @@ class ProductImplication:
     status: str
     linked_candidate_ids: tuple[str, ...]
     linked_evidence_ids: tuple[str, ...]
-    linked_study_ids: tuple[UUID, ...]
-    record_provenance: RecordProvenance | None = None
+    record_provenance: RecordProvenance

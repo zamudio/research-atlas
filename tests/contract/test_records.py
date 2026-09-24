@@ -27,10 +27,12 @@ from research_workbench.domain.evidence import (
 from research_workbench.domain.provenance import RecordProvenance
 from research_workbench.domain.studies import (
     InterventionRecord,
+    ResearchRun,
     SourceProvenance,
     SourceRecord,
     StudyRecord,
 )
+from research_workbench.domain.versioning import ProtocolVersions
 from research_workbench.schemas.research_records import ResearchRecords
 
 SOURCE_ID = UUID("19ab3dc6-f09f-49df-aadc-357e0746658b")
@@ -40,6 +42,11 @@ MEASUREMENT_ID = UUID("d1324238-2259-4381-8bf7-aaf9a426a18b")
 INTERVENTION_ID = UUID("01392873-e2cd-49be-9cc4-4c2753589a87")
 FINDING_ID = UUID("e377c619-84fa-4a58-9fa2-8624596447d5")
 NOW = datetime(2026, 9, 24, tzinfo=UTC)
+PROTOCOL_VERSIONS = ProtocolVersions(
+    extraction="0.3",
+    evidence_assessment="0.1",
+    architecture_promotion="0.1",
+)
 
 
 def representative_records() -> ResearchRecords:
@@ -71,6 +78,7 @@ def representative_records() -> ResearchRecords:
             domain_summary="Example task",
             setting_summary="Laboratory",
             sample_summary="N=100",
+            record_provenance=manual_provenance,
         ),
         StudyRecord(
             study_id=SECOND_STUDY_ID,
@@ -81,6 +89,7 @@ def representative_records() -> ResearchRecords:
             domain_summary="Example task",
             setting_summary="Online",
             sample_summary="N=150",
+            record_provenance=manual_provenance,
         ),
     )
     construct = ConstructRecord(
@@ -134,7 +143,7 @@ def representative_records() -> ResearchRecords:
     )
     evidence = EvidenceAssessment(
         evidence_id="evidence-001",
-        subject_id=construct.construct_id,
+        claim="Retrieval practice improves delayed accuracy relative to restudy.",
         supporting_finding_ids=(FINDING_ID,),
         direction="positive",
         summary="Representative synthesis for contract testing",
@@ -151,7 +160,6 @@ def representative_records() -> ResearchRecords:
     )
     candidate = ArchitectureCandidate(
         candidate_id="candidate-001",
-        subject_id=construct.construct_id,
         observable_by_product="indirectly",
         proposed_raw_signals=("item response",),
         inference_risks=("Incorrect responses are ambiguous",),
@@ -161,7 +169,6 @@ def representative_records() -> ResearchRecords:
         confidence="limited",
         status="investigate",
         linked_evidence_ids=(evidence.evidence_id,),
-        linked_study_ids=(STUDY_ID,),
         record_provenance=manual_provenance,
     )
     implication = ProductImplication(
@@ -172,11 +179,26 @@ def representative_records() -> ResearchRecords:
         status="investigate",
         linked_candidate_ids=(candidate.candidate_id,),
         linked_evidence_ids=(evidence.evidence_id,),
-        linked_study_ids=(STUDY_ID,),
         record_provenance=manual_provenance,
     )
+    research_run = ResearchRun(
+        run_id="run-contract-test",
+        project_id="contract-test",
+        run_type="schema validation",
+        purpose="Exercise the record contracts",
+        research_questions=("What supports durable learning?",),
+        protocol_versions=PROTOCOL_VERSIONS,
+        taxonomy_version="0.1",
+        search_strategy="Fixture data only",
+        search_queries=(),
+        inclusion_criteria=("Representative fixture",),
+        exclusion_criteria=(),
+        started_at=NOW,
+        completed_at=NOW,
+        included_study_ids=(STUDY_ID, SECOND_STUDY_ID),
+    )
     return ResearchRecords(
-        schema_version="0.2",
+        schema_version="0.3",
         sources=(source,),
         studies=studies,
         constructs=(construct,),
@@ -186,6 +208,7 @@ def representative_records() -> ResearchRecords:
         evidence_assessments=(evidence,),
         architecture_candidates=(candidate,),
         product_implications=(implication,),
+        research_runs=(research_run,),
     )
 
 
@@ -206,6 +229,30 @@ def test_findings_are_distinct_from_evidence_assessments() -> None:
     assert finding.result_summary != assessment.summary
 
 
+def test_evidence_assessment_can_assess_claim_without_construct_link() -> None:
+    assessment = representative_records().evidence_assessments[0]
+
+    assert assessment.claim
+    assert assessment.linked_construct_ids == ()
+
+
+def test_evidence_assessment_can_link_valid_constructs() -> None:
+    payload: dict[str, Any] = representative_records().model_dump(mode="json")
+    payload["evidence_assessments"][0]["linked_construct_ids"] = ["retrieval-strength"]
+
+    records = ResearchRecords.model_validate(payload)
+
+    assert records.evidence_assessments[0].linked_construct_ids == ("retrieval-strength",)
+
+
+def test_architecture_candidate_relies_on_evidence_without_construct_subject() -> None:
+    candidate = representative_records().architecture_candidates[0]
+
+    assert candidate.linked_evidence_ids == ("evidence-001",)
+    assert candidate.linked_construct_ids == ()
+    assert not hasattr(candidate, "subject_id")
+
+
 def test_record_provenance_is_provider_neutral_and_extensible() -> None:
     manual = RecordProvenance(
         created_in_run_id="run-1",
@@ -217,11 +264,52 @@ def test_record_provenance_is_provider_neutral_and_extensible() -> None:
         created_at=NOW,
         extraction_method="LLM-assisted",
         tool_name="local-review-tool",
-        tool_version="model-x / prompt-v3",
+        tool_version="2.1",
+        model_name="model-x",
+        model_version="2026-09",
     )
 
     assert manual.extraction_method != assisted.extraction_method
     assert assisted.tool_name == "local-review-tool"
+    assert assisted.model_name == "model-x"
+
+
+@pytest.mark.parametrize(
+    "collection",
+    (
+        "studies",
+        "constructs",
+        "measurements",
+        "interventions",
+        "findings",
+        "evidence_assessments",
+        "architecture_candidates",
+        "product_implications",
+    ),
+)
+def test_extracted_and_derived_records_require_provenance(collection: str) -> None:
+    payload: dict[str, Any] = representative_records().model_dump(mode="json")
+    del payload[collection][0]["record_provenance"]
+
+    with pytest.raises(ValidationError, match="record_provenance"):
+        ResearchRecords.model_validate(payload)
+
+
+def test_study_record_has_required_process_provenance() -> None:
+    study = representative_records().studies[0]
+
+    assert study.record_provenance.created_in_run_id == "run-contract-test"
+
+
+def test_dangling_provenance_run_is_rejected_clearly() -> None:
+    payload: dict[str, Any] = representative_records().model_dump(mode="json")
+    payload["findings"][0]["record_provenance"]["created_in_run_id"] = "missing-run"
+
+    with pytest.raises(
+        ValidationError,
+        match=r"FindingRecord .* record_provenance\.created_in_run_id reference missing IDs",
+    ):
+        ResearchRecords.model_validate(payload)
 
 
 def test_valid_linked_records_round_trip_json() -> None:
@@ -240,6 +328,14 @@ def test_source_import_boundary_requires_provider_provenance() -> None:
         ResearchRecords.model_validate(payload)
 
 
+def test_duplicate_ids_are_rejected() -> None:
+    payload: dict[str, Any] = representative_records().model_dump(mode="json")
+    payload["sources"].append(payload["sources"][0])
+
+    with pytest.raises(ValidationError, match="duplicate source IDs"):
+        ResearchRecords.model_validate(payload)
+
+
 @pytest.mark.parametrize(
     ("collection", "field", "bad_value"),
     (
@@ -255,6 +351,8 @@ def test_source_import_boundary_requires_provider_provenance() -> None:
             "supporting_finding_ids",
             ["aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"],
         ),
+        ("evidence_assessments", "linked_construct_ids", ["missing-construct"]),
+        ("architecture_candidates", "linked_construct_ids", ["missing-construct"]),
         ("architecture_candidates", "linked_evidence_ids", ["missing-evidence"]),
     ),
 )
@@ -272,13 +370,13 @@ def test_export_counts_are_derived_and_cannot_disagree() -> None:
     records = representative_records()
     manifest = ExportBundleManifest.for_records(
         records,
-        bundle_id="contract-test-0.2",
+        bundle_id="contract-test-0.3",
         generated_at=NOW,
         project_id="contract-test",
-        protocol_version="0.2",
+        protocol_versions=PROTOCOL_VERSIONS,
         taxonomy_version="0.1",
         contributing_run_ids=(),
-        construct_registry_version="0.2",
+        construct_registry_version="0.3",
         research_questions=("What supports durable learning?",),
         content_files=(ContentFile(path="records.json", sha256="a" * 64),),
     )
@@ -293,9 +391,46 @@ def test_export_counts_are_derived_and_cannot_disagree() -> None:
         ExportBundle.model_validate({"manifest": bad_manifest, "records": records})
 
     incomplete_manifest = manifest.model_dump(mode="json")
-    del incomplete_manifest["protocol_version"]
+    del incomplete_manifest["protocol_versions"]
     with pytest.raises(ValidationError):
         ExportBundleManifest.model_validate(incomplete_manifest)
+
+
+def test_protocol_versions_round_trip_through_run_and_manifest() -> None:
+    records = representative_records()
+    restored_records = ResearchRecords.model_validate_json(records.model_dump_json())
+    manifest = ExportBundleManifest.for_records(
+        records,
+        bundle_id="protocol-versions",
+        generated_at=NOW,
+        project_id="contract-test",
+        protocol_versions=PROTOCOL_VERSIONS,
+        taxonomy_version="0.1",
+        contributing_run_ids=("run-contract-test",),
+        construct_registry_version="0.3",
+        research_questions=("What supports durable learning?",),
+    )
+    restored_manifest = ExportBundleManifest.model_validate_json(manifest.model_dump_json())
+
+    assert restored_records.research_runs[0].protocol_versions == PROTOCOL_VERSIONS
+    assert restored_manifest.protocol_versions == PROTOCOL_VERSIONS
+
+
+def test_full_product_decision_chain_needs_no_redundant_study_links() -> None:
+    records = representative_records()
+    implication = records.product_implications[0]
+    candidate = records.architecture_candidates[0]
+    evidence = records.evidence_assessments[0]
+    finding = records.findings[0]
+    study = records.studies[0]
+
+    assert implication.linked_candidate_ids == (candidate.candidate_id,)
+    assert candidate.linked_evidence_ids == (evidence.evidence_id,)
+    assert evidence.supporting_finding_ids == (finding.finding_id,)
+    assert finding.source_study_id == study.study_id
+    assert study.source_id == records.sources[0].source_id
+    assert not hasattr(implication, "linked_study_ids")
+    assert not hasattr(candidate, "linked_study_ids")
 
 
 def test_frozen_domain_records_have_no_obvious_mutable_containers() -> None:

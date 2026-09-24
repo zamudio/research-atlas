@@ -38,7 +38,7 @@ class ConstructRecord:
     inference_risks: tuple[str, ...]
     candidate_architecture_destinations: tuple[str, ...]
     review_status: str
-    record_provenance: RecordProvenance | None = None
+    record_provenance: RecordProvenance
 
 
 @dataclass(frozen=True, slots=True)
@@ -52,6 +52,6 @@ class MeasurementRecord:
     operationalization: str
     instrument_or_signal: str
     timescale: str | None
+    record_provenance: RecordProvenance
     validity_notes: tuple[str, ...] = ()
     limitations: tuple[str, ...] = ()
-    record_provenance: RecordProvenance | None = None

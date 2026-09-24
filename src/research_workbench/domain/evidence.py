@@ -17,6 +17,7 @@ class FindingRecord:
     result_summary: str
     direction: str
     status: str
+    record_provenance: RecordProvenance
     linked_measurement_ids: tuple[UUID, ...] = ()
     linked_intervention_ids: tuple[UUID, ...] = ()
     effect_estimate: str | None = None
@@ -25,7 +26,6 @@ class FindingRecord:
     author_interpretation: str | None = None
     reviewer_notes: tuple[str, ...] = ()
     limitations: tuple[str, ...] = ()
-    record_provenance: RecordProvenance | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -39,17 +39,18 @@ class EvidenceDimension:
 
 @dataclass(frozen=True, slots=True)
 class EvidenceAssessment:
-    """Our assessment of a finding or evidence body, separate from author claims."""
+    """Our assessment of a claim or evidence body, separate from author findings."""
 
     evidence_id: str
-    subject_id: str
+    claim: str
     supporting_finding_ids: tuple[UUID, ...]
     direction: str
     summary: str
     dimensions: tuple[EvidenceDimension, ...]
     uncertainty_and_limitations: tuple[str, ...]
     generalizability_notes: tuple[str, ...]
+    record_provenance: RecordProvenance
+    linked_construct_ids: tuple[str, ...] = ()
     contradictory_finding_ids: tuple[UUID, ...] = ()
     null_finding_ids: tuple[UUID, ...] = ()
     assessor: str | None = None
-    record_provenance: RecordProvenance | None = None

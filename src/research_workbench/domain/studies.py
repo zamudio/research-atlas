@@ -5,6 +5,7 @@ from datetime import datetime
 from uuid import UUID
 
 from research_workbench.domain.provenance import RecordProvenance
+from research_workbench.domain.versioning import ProtocolVersions
 
 
 @dataclass(frozen=True, slots=True)
@@ -49,6 +50,7 @@ class StudyRecord:
     domain_summary: str
     setting_summary: str
     sample_summary: str
+    record_provenance: RecordProvenance
     study_label: str | None = None
 
 
@@ -63,8 +65,8 @@ class InterventionRecord:
     target_population: str
     context: str
     outcomes_studied: tuple[str, ...]
+    record_provenance: RecordProvenance
     notes: str | None = None
-    record_provenance: RecordProvenance | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -86,7 +88,7 @@ class ResearchRun:
     run_type: str
     purpose: str
     research_questions: tuple[str, ...]
-    protocol_version: str
+    protocol_versions: ProtocolVersions
     taxonomy_version: str
     search_strategy: str
     search_queries: tuple[SearchQuery, ...]

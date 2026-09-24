@@ -83,6 +83,7 @@ class ResearchRecords(BaseModel):
         finding_ids = {record.finding_id for record in self.findings}
         evidence_ids = {record.evidence_id for record in self.evidence_assessments}
         candidate_ids = {record.candidate_id for record in self.architecture_candidates}
+        run_ids = {record.run_id for record in self.research_runs}
 
         def check(label: str, values: Iterable[Hashable], valid: Iterable[Hashable]) -> None:
             missing = _missing_values(values, valid)
@@ -133,8 +134,8 @@ class ResearchRecords(BaseModel):
             )
         for record in self.evidence_assessments:
             check(
-                f"EvidenceAssessment {record.evidence_id} subject_id",
-                (record.subject_id,),
+                f"EvidenceAssessment {record.evidence_id} linked_construct_ids",
+                record.linked_construct_ids,
                 construct_ids,
             )
             check(
@@ -154,19 +155,14 @@ class ResearchRecords(BaseModel):
             )
         for record in self.architecture_candidates:
             check(
-                f"ArchitectureCandidate {record.candidate_id} subject_id",
-                (record.subject_id,),
+                f"ArchitectureCandidate {record.candidate_id} linked_construct_ids",
+                record.linked_construct_ids,
                 construct_ids,
             )
             check(
                 f"ArchitectureCandidate {record.candidate_id} linked_evidence_ids",
                 record.linked_evidence_ids,
                 evidence_ids,
-            )
-            check(
-                f"ArchitectureCandidate {record.candidate_id} linked_study_ids",
-                record.linked_study_ids,
-                study_ids,
             )
         for record in self.product_implications:
             check(
@@ -179,16 +175,72 @@ class ResearchRecords(BaseModel):
                 record.linked_evidence_ids,
                 evidence_ids,
             )
-            check(
-                f"ProductImplication {record.implication_id} linked_study_ids",
-                record.linked_study_ids,
-                study_ids,
-            )
         for record in self.research_runs:
             check(
                 f"ResearchRun {record.run_id} included_study_ids",
                 record.included_study_ids,
                 study_ids,
+            )
+
+        provenance_references = (
+            *(
+                ("StudyRecord", record.study_id, record.record_provenance.created_in_run_id)
+                for record in self.studies
+            ),
+            *(
+                ("ConstructRecord", record.construct_id, record.record_provenance.created_in_run_id)
+                for record in self.constructs
+            ),
+            *(
+                (
+                    "MeasurementRecord",
+                    record.measurement_id,
+                    record.record_provenance.created_in_run_id,
+                )
+                for record in self.measurements
+            ),
+            *(
+                (
+                    "InterventionRecord",
+                    record.intervention_id,
+                    record.record_provenance.created_in_run_id,
+                )
+                for record in self.interventions
+            ),
+            *(
+                ("FindingRecord", record.finding_id, record.record_provenance.created_in_run_id)
+                for record in self.findings
+            ),
+            *(
+                (
+                    "EvidenceAssessment",
+                    record.evidence_id,
+                    record.record_provenance.created_in_run_id,
+                )
+                for record in self.evidence_assessments
+            ),
+            *(
+                (
+                    "ArchitectureCandidate",
+                    record.candidate_id,
+                    record.record_provenance.created_in_run_id,
+                )
+                for record in self.architecture_candidates
+            ),
+            *(
+                (
+                    "ProductImplication",
+                    record.implication_id,
+                    record.record_provenance.created_in_run_id,
+                )
+                for record in self.product_implications
+            ),
+        )
+        for record_type, record_id, created_in_run_id in provenance_references:
+            check(
+                f"{record_type} {record_id} record_provenance.created_in_run_id",
+                (created_in_run_id,),
+                run_ids,
             )
 
         if errors:

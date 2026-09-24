@@ -1,4 +1,4 @@
-# Extraction Protocol v0.2
+# Extraction Protocol v0.3
 
 ## Unit of extraction
 
@@ -15,7 +15,8 @@ Source/publication -> Study/analysis -> Measurement/Intervention -> Finding
 ```
 
 A finding records what one study reported. An evidence assessment is the workbench's later
-cross-study judgment and references findings explicitly as supporting, contradictory, or null.
+judgment about an explicit claim or body of evidence and references findings as supporting,
+contradictory, or null. It may link relevant constructs but is not required to resolve to one.
 
 ## Required extraction frame
 
@@ -40,11 +41,12 @@ Across the source and its studies, capture:
 17. candidate architecture destination, including `none`;
 18. follow-up questions.
 
-Every extracted or derived record that benefits from process traceability records its creation run,
-time, extraction method, optional tool or model version, and optional review state. This process
-provenance is separate from source-provider provenance. Every extracted conclusion must retain a
-path to the study and source. Separate author interpretation, reviewer notes, and the workbench's
-evidence assessment.
+Every study, construct, measurement, intervention, finding, evidence assessment, architecture
+candidate, and product implication records its creation run, time, extraction method, optional
+tool and model versions, and optional review state. The creation run must be present in the same
+validated record set. This required process provenance is separate from source-provider
+provenance. Every extracted conclusion must retain a path to the study and source. Separate author
+interpretation, reviewer notes, and the workbench's evidence assessment.
 
 ## Terms that must not be collapsed
 
