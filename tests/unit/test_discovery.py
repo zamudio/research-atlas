@@ -176,7 +176,7 @@ def test_s2_operations_have_distinct_outcomes_and_partial_success() -> None:
             (
                 _request(openalex, "OpenAlex text"),
                 _request(relevance, "plain natural language"),
-                _request(bulk, '"exact phrase" AND review'),
+                _request(bulk, '"exact phrase" + review'),
             )
         ).execute()
     )

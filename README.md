@@ -97,7 +97,7 @@ uv run research-atlas-dry-run "urban heat mitigation systematic review" --limit 
 uv run research-atlas-dry-run "supply chain resilience" --limit 5 \
   --semantic-scholar-relevance "supply chain resilience systematic review"
 uv run research-atlas-dry-run "museum conservation" --limit 5 \
-  --semantic-scholar-bulk '"museum conservation" AND (review OR preservation)'
+  --semantic-scholar-bulk '"museum conservation" + (review | preservation)'
 uv run research-atlas-dry-run "museum conservation methods" --output tmp/dry-run.json
 uv run research-atlas-dry-run "supply chain resilience" --limit 5 \
   --semantic-scholar-relevance "supply chain resilience systematic review" \

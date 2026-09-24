@@ -127,7 +127,7 @@ def test_bulk_search_uses_boolean_endpoint_and_stops_at_limit_across_pages() -> 
     def handler(request: httpx.Request) -> httpx.Response:
         requests.append(request)
         assert request.url.path == "/graph/v1/paper/search/bulk"
-        assert request.url.params["query"] == '"intelligent tutoring systems" AND review'
+        assert request.url.params["query"] == '"intelligent tutoring systems" + review'
         if len(requests) == 1:
             assert "token" not in request.url.params
             return httpx.Response(200, json={"data": [paper(1), paper(2)], "token": "next"})
@@ -140,7 +140,7 @@ def test_bulk_search_uses_boolean_endpoint_and_stops_at_limit_across_pages() -> 
             return await SemanticScholarBulkSearch(
                 client=client,
                 request_coordinator=isolated_coordinator(clock),
-            ).search(LiteratureQuery('"intelligent tutoring systems" AND review', limit=3))
+            ).search(LiteratureQuery('"intelligent tutoring systems" + review', limit=3))
 
     records = asyncio.run(run_search())
 
