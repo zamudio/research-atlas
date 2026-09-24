@@ -16,7 +16,7 @@ Assess, where applicable:
 - **Study design:** fitness of the design for the claim, comparison, and causal language used.
 - **Replication:** independent replications, preregistered confirmations, or repeated failures.
 - **Consistency:** agreement in direction and interpretation across relevant results.
-- **Population coverage:** representation of populations to which the product might generalize.
+- **Population coverage:** representation of populations to which a consumer might generalize.
 - **Measurement validity:** evidence that operations support the intended interpretation.
 - **Effect uncertainty:** precision, plausible magnitude, model dependence, and sensitivity.
 - **Contradictory and null evidence:** relevant failures, nulls, boundary conditions, and publication
@@ -39,4 +39,4 @@ study and source link. The assessment's human-readable claim states exactly what
 being used to assess; optional construct links provide indexing and context rather than ownership.
 Uncertainty, limitations, and generalizability are first-class fields. A later assessment may
 supersede an earlier one, but the earlier version and its source links remain reproducible.
-Later product translation may reference an assessment, but must not mutate or rewrite it.
+Later application translation may reference an assessment, but must not mutate or rewrite it.

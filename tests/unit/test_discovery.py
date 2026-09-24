@@ -139,6 +139,35 @@ def test_limit_is_per_provider_and_does_not_globally_truncate() -> None:
     assert openalex.queries == semantic_scholar.queries == [query]
 
 
+def test_repeated_operation_id_supports_multiple_search_requests() -> None:
+    first = FakeLiteratureSource(
+        "openalex",
+        (_record("openalex", "W1", "10.1/first"),),
+        operation_id="openalex.search",
+    )
+    second = FakeLiteratureSource(
+        "openalex",
+        (_record("openalex", "W2", "10.1/second"),),
+        operation_id="openalex.search",
+    )
+
+    report = asyncio.run(
+        DiscoverSources(
+            (_request(first, "first exact query"), _request(second, "second exact query"))
+        ).execute()
+    )
+
+    assert [summary.operation for summary in report.searches] == [
+        "openalex.search",
+        "openalex.search",
+    ]
+    assert [summary.query for summary in report.searches] == [
+        "first exact query",
+        "second exact query",
+    ]
+    assert len(report.sources) == 2
+
+
 def test_overlap_across_providers_still_deduplicates() -> None:
     openalex = FakeLiteratureSource("openalex", (_record("openalex", "W1", "10.1/shared"),))
     semantic_scholar = FakeLiteratureSource(

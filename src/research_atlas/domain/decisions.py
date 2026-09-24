@@ -1,4 +1,4 @@
-"""Research-to-product decision records."""
+"""Optional evidence-to-application translation records."""
 
 from dataclasses import dataclass
 
@@ -6,11 +6,11 @@ from research_atlas.domain.provenance import RecordProvenance
 
 
 @dataclass(frozen=True, slots=True)
-class ArchitectureCandidate:
-    """A reviewable proposal to use research in a product architecture."""
+class ApplicationCandidate:
+    """A reviewable proposal to apply assessed evidence for a consumer."""
 
     candidate_id: str
-    observable_by_product: str
+    observability: str
     proposed_raw_signals: tuple[str, ...]
     inference_risks: tuple[str, ...]
     actionability: str
@@ -24,8 +24,8 @@ class ArchitectureCandidate:
 
 
 @dataclass(frozen=True, slots=True)
-class ProductImplication:
-    """A curated implication that may be exported to a consumer project."""
+class DecisionImplication:
+    """A curated implication for a consumer decision or action."""
 
     implication_id: str
     statement: str

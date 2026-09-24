@@ -10,7 +10,7 @@ class RecordProvenance:
 
     created_in_run_id: str
     created_at: datetime
-    extraction_method: str
+    creation_method: str
     tool_name: str | None = None
     tool_version: str | None = None
     model_name: str | None = None

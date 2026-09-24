@@ -96,9 +96,6 @@ class DiscoverSources:
     def __init__(self, searches: Sequence[LiteratureSearchRequest]) -> None:
         if not searches:
             raise ValueError("at least one literature search is required")
-        operation_ids = [search.source.operation_id for search in searches]
-        if len(operation_ids) != len(set(operation_ids)):
-            raise ValueError("literature search operation IDs must be unique in one discovery call")
         self._searches = tuple(searches)
 
     async def execute(self) -> DiscoveryReport:

@@ -7,7 +7,7 @@ from typing import Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from research_atlas.domain.versioning import ProtocolVersions
+from research_atlas.domain.versioning import ProtocolReference
 from research_atlas.schemas.research_records import ResearchRecords
 
 
@@ -33,9 +33,12 @@ class ExportCounts(BaseModel):
     constructs: int = Field(ge=0)
     measurements: int = Field(ge=0)
     interventions: int = Field(ge=0)
-    architecture_candidates: int = Field(ge=0)
-    product_implications: int = Field(ge=0)
+    application_candidates: int = Field(ge=0)
+    decision_implications: int = Field(ge=0)
     research_runs: int = Field(ge=0)
+    search_executions: int = Field(ge=0)
+    source_discoveries: int = Field(ge=0)
+    screening_decisions: int = Field(ge=0)
 
     @classmethod
     def from_records(cls, records: ResearchRecords) -> Self:
@@ -49,9 +52,12 @@ class ExportCounts(BaseModel):
             constructs=len(records.constructs),
             measurements=len(records.measurements),
             interventions=len(records.interventions),
-            architecture_candidates=len(records.architecture_candidates),
-            product_implications=len(records.product_implications),
+            application_candidates=len(records.application_candidates),
+            decision_implications=len(records.decision_implications),
             research_runs=len(records.research_runs),
+            search_executions=len(records.search_executions),
+            source_discoveries=len(records.source_discoveries),
+            screening_decisions=len(records.screening_decisions),
         )
 
 
@@ -64,7 +70,8 @@ class ExportBundleManifest(BaseModel):
     bundle_id: str
     generated_at: datetime
     project_id: str
-    protocol_versions: ProtocolVersions
+    protocol_references: tuple[ProtocolReference, ...]
+    taxonomy_reference: str
     taxonomy_version: str
     contributing_run_ids: tuple[str, ...]
     counts: ExportCounts
@@ -80,7 +87,8 @@ class ExportBundleManifest(BaseModel):
         bundle_id: str,
         generated_at: datetime,
         project_id: str,
-        protocol_versions: ProtocolVersions,
+        protocol_references: tuple[ProtocolReference, ...],
+        taxonomy_reference: str,
         taxonomy_version: str,
         contributing_run_ids: tuple[str, ...],
         construct_registry_version: str,
@@ -94,7 +102,8 @@ class ExportBundleManifest(BaseModel):
             bundle_id=bundle_id,
             generated_at=generated_at,
             project_id=project_id,
-            protocol_versions=protocol_versions,
+            protocol_references=protocol_references,
+            taxonomy_reference=taxonomy_reference,
             taxonomy_version=taxonomy_version,
             contributing_run_ids=contributing_run_ids,
             counts=ExportCounts.from_records(records),
@@ -140,7 +149,12 @@ class ExportBundle(BaseModel):
             run = runs_by_id[run_id]
             for field_name, run_value, manifest_value in (
                 ("project_id", run.project_id, self.manifest.project_id),
-                ("protocol_versions", run.protocol_versions, self.manifest.protocol_versions),
+                (
+                    "protocol_references",
+                    run.protocol_references,
+                    self.manifest.protocol_references,
+                ),
+                ("taxonomy_reference", run.taxonomy_reference, self.manifest.taxonomy_reference),
                 ("taxonomy_version", run.taxonomy_version, self.manifest.taxonomy_version),
             ):
                 if run_value != manifest_value:

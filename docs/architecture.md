@@ -1,106 +1,59 @@
 # Architecture
 
-Research Atlas uses a small ports-and-domain boundary.
+Research Atlas is a small ports-and-domain system for evidence work across three deployment
+scopes: project-specific research, a shared local ecosystem serving multiple agents/products, and
+eventual hosted/API applications. The same domain and application contracts should work in every
+scope.
 
-## Reusable core boundary
-
-The package is reusable infrastructure, not an AI Tutor or learning-science application. Core
-owns generic records, validation, provenance, discovery ports, provider adapters, synthesis
-contracts, and export mechanics. Projects own the meaning and content supplied to those
-contracts.
-
-`project_id` is opaque project data and a namespace. It is compared for export consistency but
-must never select code paths, queries, schemas, taxonomies, or destinations. `run_id` is generic
-run identity: the v0.3 boundary requires it to be unique among the research runs in one validated
-`ResearchRecords` collection, and provenance and manifests reference that exact value. Run IDs
-are not scoped or interpreted by core behavior.
-
-The following belong to project profiles or run definitions:
-
-- exact search queries and research questions;
-- inclusion and exclusion rules, scope, stopping rules, and evidence priorities;
-- project vocabulary and the versioned taxonomy selected by the run; and
-- product-specific destinations and translation constraints.
-
-Core destination fields remain strings. For example, an AI Tutor project may supply `state`,
-`policy`, `curriculum`, `telemetry`, or `ux`; another project may supply entirely different
-destinations without a core change. Generic `ArchitectureCandidate` and `ProductImplication`
-records may reference those project-supplied destinations.
-
-Evidence synthesis and product translation are separate stages. Translation may reference an
-existing `EvidenceAssessment` but must not mutate, relabel, or rewrite it. Architecture candidates
-and product implications are optional: an epistemic run can stop after synthesis. Adding a new
-project therefore requires project/run data, not edits to `src/research_atlas`.
-
-Project-owned files live under `projects/`, outside the package import boundary. Core does not
-import them.
+## Dependency direction
 
 ```text
-external tools/providers
-        |
-infrastructure adapters (OpenAlex / Semantic Scholar / Zotero)
-        |
-application-owned ports + discovery/identity service
-        |
-Pydantic import boundaries
-        |
-trusted frozen domain dataclasses + versioned protocol
-        |
-Pydantic static export manifest and normalized records
-        |
-consumer-owned import process (no runtime package dependency)
+project-owned YAML
+  ProjectProfile / TranslationProfile / RunDefinition / taxonomy
+                              |
+                              v
+application composition and ports <--- future local or hosted persistence
+  discovery / identity / export      (`ResearchWorkStore`)
+             |                                   |
+             v                                   v
+trusted frozen domain records <--- Pydantic validation boundaries
+             ^
+             |
+infrastructure adapters
+  OpenAlex / Semantic Scholar / future Crossref / Zotero
 ```
 
-The domain does not import provider SDKs or consumer code. Provider identifiers remain source
-provenance, not primary identity. Application ports discover or retrieve `SourceRecord` objects;
-one source may report multiple `StudyRecord` objects. Study findings are captured independently
-before cross-study synthesis.
+Domain records import no provider SDK, storage type, consumer package, or agent framework.
+Infrastructure implements application-owned ports. Core never branches on a project ID,
+destination string, or provider record shape.
 
-Literature discovery is async because provider operations are independent network calls; the
-application service executes explicit search requests concurrently through one consistent port.
-Each request pairs one selected operation with its exact query, so provider query syntax is never
-assumed portable. Each outcome reports both canonical provider and operation, partial success
-preserves available results, and discovery fails only when all requested operations fail. The query
-limit applies to each operation rather than globally; all unique results remain after exact-identity
-deduplication. The
-read-only Zotero reference-library port remains synchronous because `pyzotero` is synchronous.
-Raw response types are contained in adapters and never enter application or domain contracts.
+## Definition, execution, evidence, translation
 
-Semantic Scholar relevance search is a plain-natural-language, relevance-ranked operation using
-`/paper/search`. Boolean/filter-oriented retrieval is a separate, non-relevance-ranked bulk
-operation using `/paper/search/bulk` and its continuation token. Both retain canonical
-`semantic_scholar` source provenance while their discovery outcomes use distinct operation labels.
-Exact query strings and operation choices remain project/run data. A relevance failure does not
-invalidate successful bulk or other-provider results.
+`RunDefinition` is a project-owned, validated plan. It contains stable research-question IDs,
+stable search-spec IDs, scope, screening and stopping plans, protocol/taxonomy references,
+evidence strategy, outputs, and limitations. It contains no start timestamps, result counts,
+included studies, or other claims about work performed. Canonical JSON over the complete validated
+model produces a deterministic SHA-256 fingerprint.
 
-Semantic Scholar's credential-wide traffic policy is represented by one process-wide in-process
-coordinator shared by every S2 operation and endpoint. A waiter sleeps outside a short thread-safe
-critical section, then re-reads monotonic time before atomically claiming an actual start. This
-prevents overslept reservations from collapsing into simultaneous starts and works when a
-module-level coordinator is reused across repeated event loops. Pagination and retries pass through
-the same 1.1-second boundary.
+`ResearchRun` is a lean execution instance. It proves which definition was used through the
+definition reference, schema version, and fingerprint. It carries only run identity, execution
+status/timing, and the protocol/taxonomy metadata needed to verify a portable record set.
 
-The dry-run CLI adds same-machine single ownership for S2-enabled execution with a non-blocking OS
-byte-range lock in system temporary storage. A competing local process fails fast; the lock is
-released by context-manager cleanup on success or failure, and neither its path nor its error
-contains credential material. This is deliberately ownership rather than distributed pacing:
-cross-machine coordination remains deferred. S2 429 responses honor `Retry-After`, or use
-deterministic 5- and 10-second cooldowns when it is absent. Other retryable failures retain the
-generic 0.5- and 1.0-second backoff. An optional attempt observer receives secret-safe operation,
-endpoint-path, attempt, monotonic-start, status, retry-reason, and delay events; the dry-run
-`--diagnose-s2-requests` flag renders them to stderr without contaminating JSON stdout. Authenticated
-S2 live canaries are restricted to the user's local checkout, never Codex/cloud environments.
+`SearchExecution` represents one logical execution of one `search_spec_id`. Its `operation_id`
+names provider semantics, so operation IDs may repeat across requests. Exact query text is retained
+without normalization. Parameters, requested limits, timing, logical status, result count, and safe
+errors make success and failure reproducible. HTTP attempts, pages, throttling, and retries stay in
+infrastructure telemetry.
 
-OpenAlex authentication uses an `Authorization: Bearer` header, never a query parameter. OpenAlex
-retains provider-appropriate retry/backoff without an artificial 1.1-second global throttle because
-its ordinary and specialized endpoints have different policies. Endpoint-specific coordination and
-usage/budget telemetry can be added later where required.
+`SourceDiscovery` links a search execution to a normalized source. Many searches, providers, or
+runs may discover the same source. This does not replace `SourceProvenance`, which says where
+bibliographic metadata originated.
 
-Canonical scholarly identity is DOI, then PMID or arXiv, then provider namespace plus provider
-record ID. Internal source UUIDs are UUID5 values over that identity. Deduplication merges only an
-exact normalized stable identity and deterministically unions external identifiers and provider
-provenance. It intentionally does not use fuzzy title/author/year matching, so uncertain records
-remain separate for human review.
+`ScreeningDecision` is append-only and may address a publication or one study within it. A small
+decision vocabulary keeps cross-project processing predictable while reason codes stay extensible
+project/run strings. Supersession links preserve history and current state is derived.
+
+Evidence records follow the deliberately scholarly model:
 
 ```text
 SourceRecord
@@ -108,38 +61,63 @@ SourceRecord
   -> MeasurementRecord / InterventionRecord
   -> FindingRecord
   -> EvidenceAssessment
-  -> optional, separate product translation
-       -> ArchitectureCandidate
-       -> ProductImplication
 ```
 
-`EvidenceAssessment` evaluates an explicit human-readable claim or body of evidence. It links the
-supporting, contradictory, and null findings and may link zero or more relevant constructs; it is
-not owned by one construct. Architecture candidates are justified primarily by linked evidence and
-may also link constructs when useful. Product-decision records do not duplicate study links because
-the study and source path is derivable through evidence and findings. Product-decision records
-reference assessments; they do not replace or modify them.
+The 0.5 migration does not generalize this into a universal non-scholarly evidence ontology.
+`FindingRecord` captures what a study reported; `EvidenceAssessment` captures Research Atlas's
+transparent cross-finding assessment. `ConstructRecord` contains epistemic material such as
+definitions, literature-derived observables, moderators, timescales, and inference risks—not
+consumer architecture requirements.
 
-`RecordProvenance` is required on extracted or derived records and records how they were created
-and reviewed, including the creating research run. It is separate from provider provenance on
-bibliographic sources and uses extensible strings for methods, tools, models, versions, and review
-states. The centralized boundary rejects provenance that names a run absent from the record set.
+Translation is optional and downstream:
 
-`ResearchRecords` is the centralized referential-integrity boundary. It rejects duplicate IDs and
-dangling typed links before trusted dataclasses enter the application. Export counts are derived
-from those validated collections and checked against the manifest when a bundle is assembled.
-Every contributing run named by an export manifest must be present in the bundled records and must
-match the manifest's project ID, protocol versions, and taxonomy version.
+```text
+EvidenceAssessment
+  -> ApplicationCandidate
+  -> DecisionImplication
+```
 
-Extraction, evidence-assessment, and architecture-promotion protocol components have explicit,
-independent versions in research runs and export manifests. Taxonomies, construct registries,
-record schemas, and bundle manifests remain separately versioned because each can evolve at a
-different rate. Exports are immutable artifacts whose content files may be verified with SHA-256
-checksums.
+Translation records may link relevant constructs, but they cannot modify an evidence assessment.
+Destinations and constraints come from an optional `TranslationProfile`. A project doing only
+scholarly synthesis remains valid without one.
 
-Raw PDFs, large corpora, provider dumps, and temporary outputs stay in external or ignored storage.
-The v0.4 dry-run command emits only normalized source metadata to stdout or an ignored `tmp/` or
-`exports/` path. It creates no research-run or downstream research records and invokes no LLM.
-Elicit remains a manual tool on the free/basic tier; any later export/API adapter can enter through
-the existing ports, with no scraping or browser automation around service limits. Research Run 001
-has not started. Records schema 0.3 and all protocol and taxonomy versions remain frozen.
+## Validation and portability
+
+`ResearchRecords` schema 0.4 is the centralized integrity boundary. It rejects duplicate IDs and
+dangling run, search, source, study, finding, evidence, translation, provenance, and supersession
+links. It also enforces search-discovery run consistency and study/source consistency for
+screening. Derived state is not copied into `ResearchRun`.
+
+`RecordProvenance.creation_method` applies equally to import, extraction, synthesis, screening,
+review, and translation. Tool/model/reviewer/version/review metadata remain optional and
+provider-neutral.
+
+`ProtocolReference(protocol_id, version, phase)` allows protocol components to evolve or be added
+without a records-schema change. An epistemic run can cite extraction, screening, and assessment
+protocols without claiming a translation protocol.
+
+Export counts cover every records-schema collection. Bundle construction verifies counts,
+contributing runs, project identity, protocol references, taxonomy reference/version, and content
+checksums. Static bundles are immutable portable snapshots. They coexist with direct package use,
+local persistence behind `ResearchWorkStore`, and future API delivery.
+
+## Provider and identity boundaries
+
+`LiteratureSource` accepts exact provider-appropriate query text and returns normalized
+`SourceRecord` objects. OpenAlex and Semantic Scholar are current adapters; Crossref can be added
+as another adapter/operation without changing this port. The remaining Crossref work is adapter
+implementation and mapping its response/retry semantics—not a core-contract blocker.
+
+Canonical identity is DOI, then PMID or arXiv, then provider namespace plus record ID. Only exact
+normalized stable identities merge. Provider provenance is combined deterministically, while
+uncertain fuzzy matches remain separate for review.
+
+Semantic Scholar coordination, retry/backoff, diagnostics, and same-machine ownership remain
+infrastructure concerns and are unchanged by the records migration. Zotero is a separate read-only
+reference-library port.
+
+## Deliberate limits
+
+Version 0.5 adds no billing, authentication, tenancy, distributed jobs, PostgreSQL, fuzzy matching,
+universal evidence ontology, or agent-framework coupling. Run 001 remains planned and unexecuted;
+its definition contains search intents but no invented exact queries.

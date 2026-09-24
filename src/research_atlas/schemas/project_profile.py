@@ -1,4 +1,4 @@
-"""Consumer project research profile schema."""
+"""Generic project and optional consumer translation profile schemas."""
 
 from pathlib import Path
 from typing import Self
@@ -18,16 +18,15 @@ class Scope(BaseModel):
 
 
 class ProjectProfile(BaseModel):
-    """Why research is being conducted and how outputs map to a consumer."""
+    """Why a project conducts research, independent of consumer architecture."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     schema_version: str
     project_id: str = Field(min_length=1)
-    product_name: str = Field(min_length=1)
+    display_name: str = Field(min_length=1)
     research_domain: str = Field(min_length=1)
     objectives: tuple[str, ...] = Field(min_length=1)
-    architecture_targets: tuple[str, ...] = ()
     constraints_and_principles: tuple[str, ...] = Field(min_length=1)
     scope: Scope | None = None
 
@@ -38,4 +37,25 @@ class ProjectProfile(BaseModel):
         raw = yaml.safe_load(path.read_text(encoding="utf-8"))
         if not isinstance(raw, dict):
             raise ValueError("Project profile YAML must contain a mapping")
+        return cls.model_validate(raw)
+
+
+class TranslationProfile(BaseModel):
+    """Optional consumer destinations and constraints for applying evidence."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    schema_version: str
+    project_id: str = Field(min_length=1)
+    consumer_name: str = Field(min_length=1)
+    destinations: tuple[str, ...] = Field(min_length=1)
+    constraints: tuple[str, ...] = Field(min_length=1)
+
+    @classmethod
+    def from_yaml(cls, path: Path) -> Self:
+        """Load and validate an optional translation profile from YAML."""
+
+        raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+        if not isinstance(raw, dict):
+            raise ValueError("Translation profile YAML must contain a mapping")
         return cls.model_validate(raw)

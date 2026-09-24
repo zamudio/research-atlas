@@ -1,0 +1,71 @@
+from pathlib import Path
+
+import pytest
+from pydantic import ValidationError
+
+from research_atlas.schemas.run_definition import RunDefinition
+
+PROJECT_ROOT = Path(__file__).parents[2]
+RUN_DEFINITION_PATH = (
+    PROJECT_ROOT / "projects" / "ai-tutor" / "runs" / "learning-foundations-001.yaml"
+)
+
+
+def test_planned_run_definition_yaml_validates_without_exact_queries() -> None:
+    definition = RunDefinition.from_yaml(RUN_DEFINITION_PATH)
+
+    assert definition.definition_status == "planned"
+    assert definition.run_id == "learning-foundations-001"
+    assert all(not spec.execution_ready for spec in definition.search_plan.search_specs)
+    assert all(spec.exact_query is None for spec in definition.search_plan.search_specs)
+    assert not hasattr(definition, "execution_started")
+
+
+def test_run_definition_fingerprint_is_deterministic_and_content_sensitive() -> None:
+    first = RunDefinition.from_yaml(RUN_DEFINITION_PATH)
+    second = RunDefinition.model_validate(first.model_dump(mode="json"))
+
+    assert first.fingerprint() == second.fingerprint()
+    changed = first.model_copy(update={"label": "Changed label"})
+    assert changed.fingerprint() != first.fingerprint()
+    assert len(first.fingerprint()) == 64
+
+
+def test_exact_query_text_is_preserved_byte_for_character() -> None:
+    definition = RunDefinition.from_yaml(RUN_DEFINITION_PATH)
+    payload = definition.model_dump(mode="json")
+    query = 'title.search:("learning science")  AND  review\n'
+    payload["search_plan"]["search_specs"][0].update(
+        {
+            "execution_ready": True,
+            "provider_id": "openalex",
+            "operation_id": "openalex.search",
+            "exact_query": query,
+        }
+    )
+
+    parsed = RunDefinition.model_validate(payload)
+
+    assert parsed.search_plan.search_specs[0].exact_query == query
+
+
+def test_approved_definition_rejects_unapproved_search_specs() -> None:
+    definition = RunDefinition.from_yaml(RUN_DEFINITION_PATH)
+    payload = definition.model_dump(mode="json")
+    payload["definition_status"] = "approved"
+
+    with pytest.raises(ValidationError, match="execution-ready search specs"):
+        RunDefinition.model_validate(payload)
+
+
+def test_project_run_has_extensible_protocol_references() -> None:
+    definition = RunDefinition.from_yaml(RUN_DEFINITION_PATH)
+
+    assert {reference.protocol_id for reference in definition.protocol_references} == {
+        "extraction",
+        "screening",
+        "evidence-assessment",
+    }
+    assert "architecture-promotion" not in {
+        reference.protocol_id for reference in definition.protocol_references
+    }

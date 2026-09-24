@@ -12,7 +12,7 @@ The extraction and optional promotion chain is:
 ```text
 Source/publication -> Study/analysis -> Measurement/Intervention -> Finding
                    -> EvidenceAssessment
-                        -> optional, separate ArchitectureCandidate/ProductImplication
+                        -> optional, separate ApplicationCandidate/DecisionImplication
 ```
 
 A finding records what one study reported. An evidence assessment is the later cross-study
@@ -37,13 +37,13 @@ Across the source and its studies, capture:
 12. replication and generalization notes;
 13. follow-up questions.
 
-When a later, separately scoped product-translation stage is performed, also record product
-observability, candidate raw signals, inference risks and confounders, plausible product actions,
+When a later, separately scoped application-translation stage is performed, also record consumer
+observability, candidate raw signals, inference risks and confounders, plausible actions,
 and a destination from the project-supplied destination vocabulary (or no destination). These
 translation fields are not required for every finding or every evidence assessment.
 
-Every study, construct, measurement, intervention, finding, evidence assessment, architecture
-candidate, and product implication records its creation run, time, extraction method, optional
+Every study, construct, measurement, intervention, finding, evidence assessment, application
+candidate, and decision implication records its creation run, time, creation method, optional
 tool and model versions, and optional review state. The creation run must be present in the same
 validated record set. This required process provenance is separate from source-provider
 provenance. Every extracted conclusion must retain a path to the study and source. Separate author

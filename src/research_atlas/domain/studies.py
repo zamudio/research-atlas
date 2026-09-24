@@ -2,10 +2,11 @@
 
 from dataclasses import dataclass
 from datetime import datetime
+from typing import Literal
 from uuid import UUID
 
 from research_atlas.domain.provenance import RecordProvenance
-from research_atlas.domain.versioning import ProtocolVersions
+from research_atlas.domain.versioning import ProtocolReference
 
 
 @dataclass(frozen=True, slots=True)
@@ -70,33 +71,31 @@ class InterventionRecord:
 
 
 @dataclass(frozen=True, slots=True)
-class SearchQuery:
-    """One reproducible search step within a run."""
-
-    source: str
-    query: str
-    executed_at: datetime | None = None
-    filters: tuple[str, ...] = ()
-
-
-@dataclass(frozen=True, slots=True)
 class ResearchRun:
-    """Versioned metadata for one bounded research pass."""
+    """One execution instance of a validated, approved run definition."""
 
     run_id: str
     project_id: str
-    run_type: str
-    purpose: str
-    research_questions: tuple[str, ...]
-    protocol_versions: ProtocolVersions
+    definition_schema_version: str
+    definition_fingerprint: str
+    definition_reference: str
+    status: Literal["running", "completed", "failed", "cancelled"]
+    protocol_references: tuple[ProtocolReference, ...]
+    taxonomy_reference: str
     taxonomy_version: str
-    search_strategy: str
-    search_queries: tuple[SearchQuery, ...]
-    inclusion_criteria: tuple[str, ...]
-    exclusion_criteria: tuple[str, ...]
     started_at: datetime
     completed_at: datetime | None = None
-    included_study_ids: tuple[UUID, ...] = ()
-    excluded_source_references: tuple[str, ...] = ()
     notes: tuple[str, ...] = ()
-    follow_up_questions: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        if len(self.definition_fingerprint) != 64 or any(
+            character not in "0123456789abcdef" for character in self.definition_fingerprint
+        ):
+            raise ValueError("definition_fingerprint must be a lowercase SHA-256 hex digest")
+        if self.status in {"completed", "failed", "cancelled"} and self.completed_at is None:
+            raise ValueError("terminal research runs require completed_at")
+        protocol_keys = {
+            (reference.protocol_id, reference.phase) for reference in self.protocol_references
+        }
+        if len(protocol_keys) != len(self.protocol_references):
+            raise ValueError("ResearchRun protocol_id and phase pairs must be unique")

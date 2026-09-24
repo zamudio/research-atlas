@@ -34,9 +34,7 @@ class ConstructRecord:
     timescales: tuple[str, ...]
     candidate_moderators: tuple[str, ...]
     candidate_observables: tuple[CandidateObservable, ...]
-    product_observability_status: str
     inference_risks: tuple[str, ...]
-    candidate_architecture_destinations: tuple[str, ...]
     review_status: str
     record_provenance: RecordProvenance
 
