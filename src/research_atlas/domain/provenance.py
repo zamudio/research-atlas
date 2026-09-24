@@ -1,4 +1,4 @@
-"""Workbench extraction and review provenance."""
+"""Extraction and review provenance."""
 
 from dataclasses import dataclass
 from datetime import datetime

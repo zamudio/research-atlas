@@ -47,7 +47,7 @@ candidate, and product implication records its creation run, time, extraction me
 tool and model versions, and optional review state. The creation run must be present in the same
 validated record set. This required process provenance is separate from source-provider
 provenance. Every extracted conclusion must retain a path to the study and source. Separate author
-interpretation, reviewer notes, and the workbench's evidence assessment.
+interpretation, reviewer notes, and the evidence assessment.
 
 ## Terms that must not be collapsed
 
