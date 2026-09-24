@@ -7,11 +7,12 @@ record for each study or clearly separable analysis reported by that source. Pre
 identifiers as source provenance rather than adopting them as internal identity. Record absence or
 uncertainty explicitly; do not fill gaps with assumptions.
 
-The extraction and promotion chain is:
+The extraction and optional promotion chain is:
 
 ```text
 Source/publication -> Study/analysis -> Measurement/Intervention -> Finding
-                   -> EvidenceAssessment -> ArchitectureCandidate/ProductImplication
+                   -> EvidenceAssessment
+                        -> optional, separate ArchitectureCandidate/ProductImplication
 ```
 
 A finding records what one study reported. An evidence assessment is the workbench's later
@@ -34,12 +35,12 @@ Across the source and its studies, capture:
 10. limitations stated by authors and limitations identified by reviewers;
 11. moderators and subgroup conditions;
 12. replication and generalization notes;
-13. whether the relevant phenomenon is observable to the target product;
-14. candidate raw signals, with availability distinguished from interpretability;
-15. inference risks and confounders;
-16. whether a product action is plausibly supported;
-17. candidate architecture destination, including `none`;
-18. follow-up questions.
+13. follow-up questions.
+
+When a later, separately scoped product-translation stage is performed, also record product
+observability, candidate raw signals, inference risks and confounders, plausible product actions,
+and a destination from the project-supplied destination vocabulary (or no destination). These
+translation fields are not required for every finding or every evidence assessment.
 
 Every study, construct, measurement, intervention, finding, evidence assessment, architecture
 candidate, and product implication records its creation run, time, extraction method, optional

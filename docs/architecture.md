@@ -2,6 +2,39 @@
 
 Research Atlas uses a small ports-and-domain boundary.
 
+## Reusable core boundary
+
+The package is reusable infrastructure, not an AI Tutor or learning-science application. Core
+owns generic records, validation, provenance, discovery ports, provider adapters, synthesis
+contracts, and export mechanics. Projects own the meaning and content supplied to those
+contracts.
+
+`project_id` is opaque project data and a namespace. It is compared for export consistency but
+must never select code paths, queries, schemas, taxonomies, or destinations. `run_id` is generic
+run identity: the v0.3 boundary requires it to be unique among the research runs in one validated
+`ResearchRecords` collection, and provenance and manifests reference that exact value. Run IDs
+are not scoped or interpreted by core behavior.
+
+The following belong to project profiles or run definitions:
+
+- exact search queries and research questions;
+- inclusion and exclusion rules, scope, stopping rules, and evidence priorities;
+- project vocabulary and the versioned taxonomy selected by the run; and
+- product-specific destinations and translation constraints.
+
+Core destination fields remain strings. For example, an AI Tutor project may supply `state`,
+`policy`, `curriculum`, `telemetry`, or `ux`; another project may supply entirely different
+destinations without a core change. Generic `ArchitectureCandidate` and `ProductImplication`
+records may reference those project-supplied destinations.
+
+Evidence synthesis and product translation are separate stages. Translation may reference an
+existing `EvidenceAssessment` but must not mutate, relabel, or rewrite it. Architecture candidates
+and product implications are optional: an epistemic run can stop after synthesis. Adding a new
+project therefore requires project/run data, not edits to `src/research_atlas`.
+
+Project-owned files live under `projects/`, outside the package import boundary. Core does not
+import them.
+
 ```text
 external tools/providers
         |
@@ -44,15 +77,17 @@ SourceRecord
   -> MeasurementRecord / InterventionRecord
   -> FindingRecord
   -> EvidenceAssessment
-  -> ArchitectureCandidate
-  -> ProductImplication
+  -> optional, separate product translation
+       -> ArchitectureCandidate
+       -> ProductImplication
 ```
 
 `EvidenceAssessment` evaluates an explicit human-readable claim or body of evidence. It links the
 supporting, contradictory, and null findings and may link zero or more relevant constructs; it is
 not owned by one construct. Architecture candidates are justified primarily by linked evidence and
 may also link constructs when useful. Product-decision records do not duplicate study links because
-the study and source path is derivable through evidence and findings.
+the study and source path is derivable through evidence and findings. Product-decision records
+reference assessments; they do not replace or modify them.
 
 `RecordProvenance` is required on extracted or derived records and records how they were created
 and reviewed, including the creating research run. It is separate from provider provenance on

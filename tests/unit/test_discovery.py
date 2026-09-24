@@ -54,7 +54,9 @@ def test_openalex_success_is_preserved_when_semantic_scholar_fails() -> None:
     )
 
     report = asyncio.run(
-        DiscoverSources((openalex, semantic_scholar)).execute(LiteratureQuery("feedback", limit=3))
+        DiscoverSources((openalex, semantic_scholar)).execute(
+            LiteratureQuery("example topic", limit=3)
+        )
     )
 
     assert len(report.sources) == 1
@@ -73,7 +75,9 @@ def test_semantic_scholar_success_is_preserved_when_openalex_fails() -> None:
     )
 
     report = asyncio.run(
-        DiscoverSources((openalex, semantic_scholar)).execute(LiteratureQuery("feedback", limit=3))
+        DiscoverSources((openalex, semantic_scholar)).execute(
+            LiteratureQuery("example topic", limit=3)
+        )
     )
 
     assert len(report.sources) == 1
@@ -89,7 +93,7 @@ def test_all_provider_failures_raise_with_observable_outcomes() -> None:
     )
 
     with pytest.raises(DiscoveryFailedError) as caught:
-        asyncio.run(DiscoverSources(providers).execute(LiteratureQuery("feedback")))
+        asyncio.run(DiscoverSources(providers).execute(LiteratureQuery("example topic")))
 
     assert caught.value.report.sources == ()
     assert [outcome.provider for outcome in caught.value.report.provider_outcomes] == [
@@ -110,7 +114,7 @@ def test_limit_is_per_provider_and_does_not_globally_truncate() -> None:
             _record("semantic_scholar", f"S{index}", f"10.1/semantic-{index}") for index in range(3)
         ),
     )
-    query = LiteratureQuery("feedback", limit=3)
+    query = LiteratureQuery("example topic", limit=3)
 
     report = asyncio.run(DiscoverSources((openalex, semantic_scholar)).execute(query))
 
@@ -125,7 +129,7 @@ def test_overlap_across_providers_still_deduplicates() -> None:
     )
 
     report = asyncio.run(
-        DiscoverSources((openalex, semantic_scholar)).execute(LiteratureQuery("feedback"))
+        DiscoverSources((openalex, semantic_scholar)).execute(LiteratureQuery("example topic"))
     )
 
     assert len(report.sources) == 1
@@ -143,13 +147,13 @@ def test_dry_run_report_serialization_includes_provider_health_and_counts() -> N
     )
     report = asyncio.run(
         DiscoverSources((openalex, semantic_scholar)).execute(
-            LiteratureQuery('"retrieval practice" AND review')
+            LiteratureQuery('"example phrase" AND review')
         )
     )
 
     payload = serialize_report(report)
 
-    assert payload["query"] == '"retrieval practice" AND review'
+    assert payload["query"] == '"example phrase" AND review'
     assert payload["normalized_source_count"] == 1
     assert payload["cross_provider_merge_count"] == 0
     assert payload["provider_outcomes"] == [

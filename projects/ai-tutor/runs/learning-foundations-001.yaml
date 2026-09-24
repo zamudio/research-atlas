@@ -1,0 +1,124 @@
+definition_status: "planned"
+execution_started: false
+project_id: "ai-tutor"
+run_id: "learning-foundations-001"
+label: "Learning Foundations Landscape"
+output_label: "Learning Foundations Landscape v0.1"
+run_type: "landscape_mapping"
+
+versions:
+  records_schema: "0.3"
+  protocols:
+    extraction: "0.3"
+    evidence_assessment: "0.1"
+    architecture_promotion: "0.1"
+  taxonomy: "0.1"
+taxonomy_reference: "projects/ai-tutor/taxonomies/research_taxonomy_0.1.md"
+
+purpose: >-
+  Map the strongest, most relevant bodies of evidence across human learning and instruction to
+  establish the evidence landscape, initial construct registry, major interventions and
+  moderators, contested areas, and prioritized research agenda for AI Tutor.
+
+research_questions:
+  - id: "RQ1"
+    question: >-
+      Which mechanisms, constructs, and phenomena are important to acquisition, retention,
+      transfer, and effective instruction?
+  - id: "RQ2"
+    question: >-
+      Which instructional strategies and interventions have reliable effects, and under which
+      conditions?
+  - id: "RQ3"
+    question: >-
+      How are learner states and processes operationalized and measured, and what limits their
+      interpretation?
+  - id: "RQ4"
+    question: >-
+      How are effects moderated by prior knowledge, expertise, age or development, task
+      difficulty, domain, modality, and setting?
+  - id: "RQ5"
+    question: >-
+      Which widely discussed claims are mixed, weak, contested, null, narrow, or contradicted?
+
+research_agenda_synthesis: >-
+  Which findings, uncertainties, contradictions, measurement problems, and evidence gaps warrant
+  dedicated follow-up research runs?
+
+translation_boundary: >-
+  This run is epistemic. Product and architecture translation happens later, separately, after
+  evidence synthesis. ArchitectureCandidate and ProductImplication are not required for every
+  finding.
+
+landscape_families:
+  - "learning, memory, and practice"
+  - "instruction and cognitive load"
+  - "feedback and assessment"
+  - "metacognition and self-regulation"
+  - "errors and conceptual change"
+  - "motivation and engagement"
+  - "moderators and learner differences"
+  - "tutoring and dialogue"
+
+evidence_priority:
+  - "umbrella reviews"
+  - "systematic reviews and meta-analyses"
+  - "broad scholarly reviews"
+  - "measurement and methodological reviews"
+  - "landmark primary studies"
+  - "individual primary studies as needed"
+
+scope:
+  include:
+    - "human learning, instruction, assessment, cognition, motivation, self-regulation, and educational behavior"
+    - "syntheses from 2010 through 2026 are preferred, with no hard date cutoff"
+    - "older foundational work when justified"
+    - "all human ages and domains, with population and generalizability recorded"
+  exclude:
+    - "non-human learning"
+    - "machine-learning algorithms rather than human learning"
+    - "purely biological or neuroscientific work with no educational interpretation"
+    - "commercial or product opinion without empirical evidence"
+    - "general AI implementation with no meaningful learning question"
+    - "pure engagement optimization without an educational construct or outcome"
+    - "duplicates"
+
+screening_stages:
+  - "discovery"
+  - "relevance screen"
+  - "evidence screen"
+  - "extraction and mapping"
+
+search_strategy:
+  approach: "Use multiple targeted query variants per landscape family; exact queries are run data."
+  providers:
+    primary: "OpenAlex"
+    secondary_optional: "Semantic Scholar"
+    manual_cross_check: "Elicit"
+    canonical_library: "Zotero"
+  citation_chaining: true
+
+stopping_rule: >-
+  Stop at saturation, when successive targeted query variants and citation chaining produce
+  materially no new sources, constructs, interventions, moderators, or controversies. Do not use
+  an arbitrary fixed-paper count.
+
+outputs:
+  - "query log"
+  - "included and excluded sources with reasons"
+  - "construct registry"
+  - "measurement map"
+  - "intervention map"
+  - "findings"
+  - "preliminary EvidenceAssessments"
+  - "contradiction, null, and controversy register"
+  - "moderator map"
+  - "generalizability notes"
+  - "unanswered questions"
+  - "prioritized follow-up runs"
+  - "Learning Foundations Landscape v0.1"
+
+limitation: >-
+  This is an internal structured landscape review, not a publication-grade systematic review. It
+  is provenance-tracked and reproducible, but is not independently duplicated by multiple human
+  reviewers.

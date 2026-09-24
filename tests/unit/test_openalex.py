@@ -13,7 +13,7 @@ def test_openalex_maps_mocked_work_and_retries_rate_limit() -> None:
         nonlocal calls
         calls += 1
         assert request.url.path == "/works"
-        assert request.url.params["search"] == "formative feedback"
+        assert request.url.params["search"] == "example topic"
         assert request.url.params["per_page"] == "5"
         if calls == 1:
             return httpx.Response(429, headers={"Retry-After": "0"})
@@ -24,7 +24,7 @@ def test_openalex_maps_mocked_work_and_retries_rate_limit() -> None:
                     {
                         "id": "https://openalex.org/W123",
                         "doi": "https://doi.org/10.1000/EXAMPLE",
-                        "title": "Feedback works",
+                        "title": "Example result",
                         "authorships": [
                             {"author": {"display_name": "Ada Author"}},
                             {"author": {"display_name": "Ben Writer"}},
@@ -52,7 +52,7 @@ def test_openalex_maps_mocked_work_and_retries_rate_limit() -> None:
             transport=httpx.MockTransport(handler), base_url="https://api.openalex.org"
         ) as client:
             return await OpenAlexLiteratureSource(client=client).search(
-                LiteratureQuery("formative feedback", limit=5)
+                LiteratureQuery("example topic", limit=5)
             )
 
     records = asyncio.run(run_search())
@@ -60,7 +60,7 @@ def test_openalex_maps_mocked_work_and_retries_rate_limit() -> None:
     assert calls == 2
     assert len(records) == 1
     record = records[0]
-    assert record.title == "Feedback works"
+    assert record.title == "Example result"
     assert record.authors == ("Ada Author", "Ben Writer")
     assert record.year == 2022
     assert record.source_type == "article"

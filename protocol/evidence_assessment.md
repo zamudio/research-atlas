@@ -4,9 +4,9 @@
 
 Evidence assessment is our documented evaluation of an explicit claim or body of evidence, not a
 copy of paper authors' claims. The claim may concern a construct, intervention, relationship,
-modality, UX effect, or another cross-study question; an assessment may link relevant constructs
-but is not required to belong to one. It must not collapse scientific support into a universal
-numeric score.
+modality, interface effect, or another cross-study question; an assessment may link relevant
+constructs but is not required to belong to one. It must not collapse scientific support into a
+universal numeric score.
 Use explicit qualitative levels with a rationale for each relevant dimension.
 
 ## Dimensions
@@ -39,3 +39,4 @@ study and source link. The assessment's human-readable claim states exactly what
 being used to assess; optional construct links provide indexing and context rather than ownership.
 Uncertainty, limitations, and generalizability are first-class fields. A later assessment may
 supersede an earlier one, but the earlier version and its source links remain reproducible.
+Later product translation may reference an assessment, but must not mutate or rewrite it.

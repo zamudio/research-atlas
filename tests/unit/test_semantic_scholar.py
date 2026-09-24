@@ -37,7 +37,7 @@ def test_semantic_scholar_maps_mocked_paper() -> None:
     async def run_search():
         async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
             return await SemanticScholarLiteratureSource("secret", client).search(
-                LiteratureQuery("feedback", limit=5)
+                LiteratureQuery("example topic", limit=5)
             )
 
     records = asyncio.run(run_search())

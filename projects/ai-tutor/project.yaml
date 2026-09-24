@@ -1,0 +1,27 @@
+schema_version: "0.1"
+project_id: "ai-tutor"
+product_name: "AI Tutor"
+research_domain: "human learning and instruction relevant to an adaptive AI tutoring product"
+objectives:
+  - "Build a provenance-tracked evidence base about human learning and effective instruction."
+  - "Identify important constructs, interventions, moderators, measurement limits, and contested claims."
+  - "Separate evidence synthesis from later product and architecture translation."
+architecture_targets:
+  - "state"
+  - "policy"
+  - "curriculum"
+  - "telemetry"
+  - "ux"
+constraints_and_principles:
+  - "Treat project_id as an opaque namespace, never a behavior switch."
+  - "Keep observations distinct from inferences."
+  - "Do not infer unobservable traits or encode unsupported learning styles."
+  - "Do not promote constructs into architecture merely because they are frequently mentioned."
+  - "Product translation must not mutate or rewrite an EvidenceAssessment."
+scope:
+  age:
+    - "all human ages; record population and generalizability"
+  population:
+    - "human learners and participants in instructional or assessment contexts"
+  domain:
+    - "all human learning and instruction domains"

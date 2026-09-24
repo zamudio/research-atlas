@@ -93,16 +93,16 @@ def representative_records() -> ResearchRecords:
         ),
     )
     construct = ConstructRecord(
-        construct_id="retrieval-strength",
-        canonical_name="Retrieval strength",
+        construct_id="example-construct",
+        canonical_name="Example construct",
         aliases=(),
         definitions=(SourcedDefinition(text="Example definition", source_ids=(SOURCE_ID,)),),
         timescales=("session",),
         candidate_moderators=(),
-        candidate_observables=(CandidateObservable(description="Delayed response accuracy"),),
+        candidate_observables=(CandidateObservable(description="Recorded outcome"),),
         product_observability_status="indirect",
         inference_risks=("Accuracy has multiple causes",),
-        candidate_architecture_destinations=("policy",),
+        candidate_architecture_destinations=("project-supplied-destination",),
         review_status="investigate",
         record_provenance=manual_provenance,
     )
@@ -110,40 +110,40 @@ def representative_records() -> ResearchRecords:
         measurement_id=MEASUREMENT_ID,
         source_study_id=STUDY_ID,
         target_construct_id=construct.construct_id,
-        name="Delayed test",
-        operationalization="Proportion correct after a delay",
-        instrument_or_signal="Item responses",
-        timescale="one week",
+        name="Example measure",
+        operationalization="Recorded outcome value",
+        instrument_or_signal="Observation record",
+        timescale="one interval",
         record_provenance=manual_provenance,
     )
     intervention = InterventionRecord(
         intervention_id=INTERVENTION_ID,
         source_study_id=STUDY_ID,
-        description="Retrieval practice",
-        comparator="Restudy",
+        description="Example intervention",
+        comparator="Example comparator",
         target_population="Adult volunteers",
         context="Laboratory task",
-        outcomes_studied=("Delayed test accuracy",),
+        outcomes_studied=("Recorded outcome",),
         record_provenance=manual_provenance,
     )
     finding = FindingRecord(
         finding_id=FINDING_ID,
         source_study_id=STUDY_ID,
-        question_investigated="Does retrieval practice improve delayed accuracy?",
-        outcome_investigated="Delayed test accuracy",
-        result_summary="Retrieval practice produced higher delayed accuracy than restudy.",
+        question_investigated="Does the intervention change the recorded outcome?",
+        outcome_investigated="Recorded outcome",
+        result_summary="The intervention produced a higher value than the comparator.",
         direction="positive",
         status="reported",
         linked_measurement_ids=(MEASUREMENT_ID,),
         linked_intervention_ids=(INTERVENTION_ID,),
-        effect_estimate="standardized mean difference reported by authors",
+        effect_estimate="standardized difference reported by authors",
         uncertainty="confidence interval reported in the source",
         limitations=("Single task",),
         record_provenance=manual_provenance,
     )
     evidence = EvidenceAssessment(
         evidence_id="evidence-001",
-        claim="Retrieval practice improves delayed accuracy relative to restudy.",
+        claim="The intervention improves the recorded outcome relative to the comparator.",
         supporting_finding_ids=(FINDING_ID,),
         direction="positive",
         summary="Representative synthesis for contract testing",
@@ -161,11 +161,11 @@ def representative_records() -> ResearchRecords:
     candidate = ArchitectureCandidate(
         candidate_id="candidate-001",
         observable_by_product="indirectly",
-        proposed_raw_signals=("item response",),
-        inference_risks=("Incorrect responses are ambiguous",),
-        actionability="may alter practice selection",
-        proposed_destination="policy",
-        rationale="Use aggregate task evidence without assigning a trait.",
+        proposed_raw_signals=("recorded observation",),
+        inference_risks=("The observation may have multiple causes",),
+        actionability="may alter a project decision",
+        proposed_destination="project-supplied-destination",
+        rationale="Use aggregate evidence without assigning an unsupported property.",
         confidence="limited",
         status="investigate",
         linked_evidence_ids=(evidence.evidence_id,),
@@ -173,9 +173,9 @@ def representative_records() -> ResearchRecords:
     )
     implication = ProductImplication(
         implication_id="implication-001",
-        statement="Consider retrieval opportunities in practice selection.",
+        statement="Consider the intervention when making the project decision.",
         rationale="The candidate remains traceable to assessed findings.",
-        destination="policy",
+        destination="project-supplied-destination",
         status="investigate",
         linked_candidate_ids=(candidate.candidate_id,),
         linked_evidence_ids=(evidence.evidence_id,),
@@ -186,7 +186,7 @@ def representative_records() -> ResearchRecords:
         project_id="contract-test",
         run_type="schema validation",
         purpose="Exercise the record contracts",
-        research_questions=("What supports durable learning?",),
+        research_questions=("What does the evidence support?",),
         protocol_versions=PROTOCOL_VERSIONS,
         taxonomy_version="0.1",
         search_strategy="Fixture data only",
@@ -222,7 +222,7 @@ def representative_manifest(records: ResearchRecords) -> ExportBundleManifest:
         taxonomy_version="0.1",
         contributing_run_ids=("run-contract-test",),
         construct_registry_version="0.3",
-        research_questions=("What supports durable learning?",),
+        research_questions=("What does the evidence support?",),
         content_files=(ContentFile(path="records.json", sha256="a" * 64),),
     )
 
@@ -253,11 +253,11 @@ def test_evidence_assessment_can_assess_claim_without_construct_link() -> None:
 
 def test_evidence_assessment_can_link_valid_constructs() -> None:
     payload: dict[str, Any] = representative_records().model_dump(mode="json")
-    payload["evidence_assessments"][0]["linked_construct_ids"] = ["retrieval-strength"]
+    payload["evidence_assessments"][0]["linked_construct_ids"] = ["example-construct"]
 
     records = ResearchRecords.model_validate(payload)
 
-    assert records.evidence_assessments[0].linked_construct_ids == ("retrieval-strength",)
+    assert records.evidence_assessments[0].linked_construct_ids == ("example-construct",)
 
 
 def test_architecture_candidate_relies_on_evidence_without_construct_subject() -> None:
@@ -506,7 +506,7 @@ def test_protocol_versions_round_trip_through_run_and_manifest() -> None:
         taxonomy_version="0.1",
         contributing_run_ids=("run-contract-test",),
         construct_registry_version="0.3",
-        research_questions=("What supports durable learning?",),
+        research_questions=("What does the evidence support?",),
     )
     restored_manifest = ExportBundleManifest.model_validate_json(manifest.model_dump_json())
 

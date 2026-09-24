@@ -102,7 +102,7 @@ def test_merge_is_deterministic_and_combines_identifiers_and_provenance() -> Non
 
 
 def test_similar_titles_without_shared_identifier_do_not_merge() -> None:
-    first = _source("openalex", "W1", title="Learning with feedback")
-    second = _source("semantic_scholar", "S2", title="Learning With Feedback")
+    first = _source("openalex", "W1", title="Example research topic")
+    second = _source("semantic_scholar", "S2", title="Example Research Topic")
 
     assert len(merge_sources((first, second))) == 2

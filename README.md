@@ -5,6 +5,28 @@ reviewable product decisions. Version 0.4.1 adds reliable partial-provider repor
 v0.4 provider/ingestion foundation and its small
 developer dry run while keeping the v0.3 records schema frozen.
 
+## Core/project boundary
+
+Research Atlas core is domain-neutral infrastructure. A new research project must be usable by
+supplying project and run data without modifying `src/research_atlas`, the generic record schema,
+or provider logic.
+
+- `project_id` is an opaque namespace carried through records and exports. Core code must never
+  branch on its value.
+- `run_id` is the identity of a research run. It remains unique within a validated
+  `ResearchRecords` collection and is referenced by provenance and export manifests; it is not a
+  behavior switch.
+- Search queries, research questions, inclusion and exclusion rules, project vocabulary, and
+  product destinations are project/run data, not core logic.
+- `ArchitectureCandidate.proposed_destination` and `ProductImplication.destination` are generic
+  strings populated from project configuration. Destinations such as `state`, `policy`,
+  `curriculum`, `telemetry`, or `ux` are not core enums.
+- Product translation is a separate, optional stage. It may create architecture candidates and
+  product implications that reference an `EvidenceAssessment`, but it must not mutate or rewrite
+  that underlying assessment.
+
+Project-owned definitions live under `projects/`. Nothing in core imports them.
+
 ## What it is
 
 - A normalized internal representation for bibliographic sources, studies, constructs,
@@ -24,8 +46,8 @@ models stop at application-owned ports. Elicit free/basic may be used manually, 
 Elicit integration is deferred: this project does not scrape or browser-automate around plan or
 API limits. A future Elicit export or API importer can use the same ingestion boundary.
 
-Consumer projects such as AI Tutor receive curated exports. They do not import or run Research
-Atlas in production.
+Consumer projects receive curated exports. They do not import or run Research Atlas in
+production.
 
 ## Lifecycle
 
@@ -36,7 +58,8 @@ Atlas in production.
    process provenance tied to the creating research run.
 5. Synthesize findings into claim-centered evidence assessments, optionally linking relevant
    constructs.
-6. Review architecture candidates and product implications.
+6. When a project calls for product translation, review architecture candidates and product
+   implications without changing the underlying evidence assessments.
 7. Publish a checksummed, versioned static export bundle.
 
 Export manifests are accepted only when every contributing run is bundled and matches the
@@ -51,8 +74,8 @@ manifest's project ID, protocol versions, and taxonomy version.
 - `src/research_atlas/infrastructure/providers`: OpenAlex, Semantic Scholar, and Zotero
   adapters.
 - `src/research_atlas/application/export`: static bundle contracts and checksums.
-- `protocol`: independently versioned taxonomy, extraction, evidence, and promotion guidance.
-- `templates`: example project profiles; these do not start a research run.
+- `protocol`: independently versioned generic extraction, evidence, and promotion guidance.
+- `projects`: project-owned profiles and planned run definitions; core never imports them.
 
 Raw PDFs, corpora, provider dumps, and generated exports are intentionally ignored by Git.
 
@@ -70,9 +93,9 @@ cross-provider deduplication. Broad semantic or exploratory discovery may be con
 is not part of v0.4.1.
 
 ```shell
-uv run research-atlas-dry-run "formative feedback intelligent tutoring" --limit 8
-uv run research-atlas-dry-run "formative feedback" --limit 5 --semantic-scholar
-uv run research-atlas-dry-run "formative feedback" --output tmp/dry-run.json
+uv run research-atlas-dry-run "urban heat mitigation systematic review" --limit 8
+uv run research-atlas-dry-run "supply chain resilience" --limit 5 --semantic-scholar
+uv run research-atlas-dry-run "museum conservation methods" --output tmp/dry-run.json
 ```
 
 OpenAlex and Semantic Scholar keys are optional for small calls. Copy `.env.example` to `.env` to
