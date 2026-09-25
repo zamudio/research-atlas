@@ -39,11 +39,8 @@ def test_request_mapping_parameters_and_retry_after() -> None:
         assert request.url.path == "/works"
         assert request.url.params["query.bibliographic"] == "exact bibliography"
         assert request.url.params["rows"] == "5"
-        assert request.url.params["cursor"] == "*"
-        assert request.url.params.get_list("filter") == [
-            "type:journal-article",
-            "from-pub-date:2020",
-        ]
+        assert "cursor" not in request.url.params
+        assert request.url.params["filter"] == "type:journal-article,from-pub-date:2020"
         assert request.url.params["sort"] == "relevance"
         assert request.url.params["mailto"] == "researcher@example.test"
         assert request.headers["user-agent"] == "ResearchAtlas/Crossref-feasibility"
@@ -111,14 +108,14 @@ def test_reserved_parameters_fail_before_request(name: str) -> None:
         search(forbidden, LiteratureQuery("query", parameters=(SearchParameter(name, "value"),)))
 
 
-def test_cursor_pagination_reuses_token_and_stops_at_logical_limit() -> None:
+def test_cursor_pagination_uses_new_token_and_stops_at_logical_limit() -> None:
     requests: list[httpx.Request] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
         requests.append(request)
         page = len(requests)
-        assert request.url.params["cursor"] == ("*" if page == 1 else "same+/=token")
-        assert request.url.params["rows"] == ("100" if page < 3 else "5")
+        assert request.url.params["cursor"] == ("*" if page == 1 else f"next-{page - 1}")
+        assert request.url.params["rows"] == "100"
         assert request.url.params["filter"] == "type:journal-article"
         assert "mailto" not in request.url.params
         return httpx.Response(
@@ -126,7 +123,7 @@ def test_cursor_pagination_reuses_token_and_stops_at_logical_limit() -> None:
             json={
                 "message": {
                     "items": [{"DOI": f"10.1000/{page}-{i}"} for i in range(100)],
-                    "next-cursor": "same+/=token",
+                    "next-cursor": f"next-{page}",
                 }
             },
         )
@@ -140,6 +137,37 @@ def test_cursor_pagination_reuses_token_and_stops_at_logical_limit() -> None:
     assert len(records) == 205
     assert len(requests) == 3
     assert records[-1].external_identifiers[0].value == "10.1000/3-4"
+
+
+@pytest.mark.parametrize("sort", ["issued", "published", "published-print", "published-online"])
+def test_cursor_incompatible_sort_fails_before_request(sort: str) -> None:
+    def forbidden(_request: httpx.Request) -> httpx.Response:
+        raise AssertionError("incompatible cursor sort must fail before network access")
+
+    with pytest.raises(ValueError, match="incompatible with required cursor pagination"):
+        search(
+            forbidden,
+            LiteratureQuery("query", limit=101, parameters=(SearchParameter("sort", sort),)),
+        )
+
+
+def test_cursor_incompatible_sort_allows_single_page_without_cursor() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.params["sort"] == "issued"
+        assert "cursor" not in request.url.params
+        return httpx.Response(200, json={"message": {"items": [{"DOI": "10.1000/example"}]}})
+
+    assert (
+        len(
+            search(
+                handler,
+                LiteratureQuery(
+                    "query", limit=100, parameters=(SearchParameter("sort", "issued"),)
+                ),
+            )
+        )
+        == 1
+    )
 
 
 @pytest.mark.parametrize(("count", "cursor"), [(0, "more"), (1, "more"), (100, None), (100, "")])

@@ -41,6 +41,9 @@ class CrossrefWorksSearch:
     operation_id = "crossref.works"
     _page_size = 100
     _select = "DOI,title,author,published,published-print,published-online,issued,type,URL"
+    _cursor_incompatible_sorts = frozenset(
+        {"issued", "published", "published-print", "published-online"}
+    )
     _reserved = frozenset(
         {"query.bibliographic", "rows", "cursor", "select", "mailto", "offset", "sample"}
     )
@@ -62,26 +65,40 @@ class CrossrefWorksSearch:
     async def _search(
         self, client: httpx.AsyncClient, query: LiteratureQuery
     ) -> tuple[SourceRecord, ...]:
-        records: list[SourceRecord] = []
-        cursor = "*"
-        while len(records) < query.limit:
-            rows = min(query.limit - len(records), self._page_size)
-            params = httpx.QueryParams(
-                {
-                    "query.bibliographic": query.query,
-                    "rows": rows,
-                    "cursor": cursor,
-                    "select": self._select,
-                }
-            )
-            if self._mailto:
-                params = params.add("mailto", self._mailto)
-            for parameter in query.parameters:
+        page_size = min(query.limit, self._page_size)
+        requires_cursor = query.limit > page_size
+        if requires_cursor and any(
+            parameter.name == "sort" and parameter.value in self._cursor_incompatible_sorts
+            for parameter in query.parameters
+        ):
+            raise ValueError("Crossref sort is incompatible with required cursor pagination")
+
+        params = httpx.QueryParams(
+            {
+                "query.bibliographic": query.query,
+                "rows": page_size,
+                "select": self._select,
+            }
+        )
+        if self._mailto:
+            params = params.add("mailto", self._mailto)
+        filter_values = [
+            parameter.value for parameter in query.parameters if parameter.name == "filter"
+        ]
+        if filter_values:
+            params = params.add("filter", ",".join(filter_values))
+        for parameter in query.parameters:
+            if parameter.name != "filter":
                 params = params.add(parameter.name, parameter.value)
+
+        records: list[SourceRecord] = []
+        cursor = "*" if requires_cursor else None
+        while len(records) < query.limit:
+            request_params = params.add("cursor", cursor) if cursor is not None else params
             response = await get_with_retries(
                 client,
                 f"{self.base_url}/works",
-                params=params,
+                params=request_params,
                 headers={"User-Agent": "ResearchAtlas/Crossref-feasibility"},
             )
             payload: object = response.json()
@@ -90,16 +107,15 @@ class CrossrefWorksSearch:
             if not isinstance(raw_items, list):
                 raise ValueError("Crossref response message.items must be a list")
             items = cast(list[object], raw_items)
+            next_cursor = message.get("next-cursor")
             for raw in items[: query.limit - len(records)]:
                 if not isinstance(raw, Mapping):
                     raise ValueError("Crossref work must be an object")
                 records.append(self._map_work(cast(Mapping[str, object], raw)))
-            if len(records) >= query.limit or len(items) < rows:
+            if len(records) >= query.limit or len(items) < page_size:
                 break
-            next_cursor = message.get("next-cursor")
             if not isinstance(next_cursor, str) or not next_cursor:
                 break
-            # Crossref can reuse a cursor token across pages; a repeated token is not EOF.
             cursor = next_cursor
         return tuple(records)
 

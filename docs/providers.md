@@ -20,12 +20,18 @@ with a generic User-Agent; optional `RESEARCH_ATLAS_CROSSREF_MAILTO` supplies yo
 via `mailto`. No default address is supplied. Public metadata access does not imply full-text access.
 
 `LiteratureQuery.query` maps exactly to `/works?query.bibliographic=...`. Generic parameters
-(including repeated names) are forwarded. `query.bibliographic`, `rows`, `cursor`, `select`, and
-`mailto` are adapter-owned; collisions raise `ValueError`. `offset` and `sample` are also rejected
+(including repeated names) are forwarded, except repeated `filter` values are preserved in order
+and serialized as Crossref's single comma-separated `filter` value. `query.bibliographic`,
+`rows`, `cursor`, `select`, and `mailto` are adapter-owned; collisions raise `ValueError`.
+`offset` and `sample` are also rejected
 because [Crossref cursors cannot be combined with them](https://github.com/CrossRef/rest-api-doc).
-Pagination is sequential, at most 100 items per request, and stops at the logical limit, a short
-page, or an absent cursor. The existing HTTP retry helper honors `Retry-After`; no S2 coordinator
-or ownership guard is acquired for Crossref, and no throughput guarantee is assumed.
+Single-page requests do not use a cursor. Cursor pagination is sequential, at most 100 items per
+request, carries all non-cursor request parameters unchanged across pages, uses the newly returned
+cursor token for the next page, and trims results locally to the logical limit. Sorts by `issued`,
+`published`, `published-print`, or `published-online` are allowed for single-page requests but
+fail before network access when cursor pagination would be required. The existing HTTP retry helper
+honors `Retry-After`; no S2 coordinator or ownership guard is acquired for Crossref, and no
+throughput guarantee is assumed.
 
 The normalized DOI supplies both exact identity and the Crossref provenance record ID. No fuzzy
 matching is added. Missing titles remain empty, authors empty, year/URL null, and type `unknown`.

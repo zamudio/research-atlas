@@ -81,6 +81,7 @@ bundles are immutable portable snapshots; direct package use, local persistence 
 
 ## Deliberate limits
 
-Version 0.5.2 adds no Crossref adapter, billing, authentication, tenancy, distributed jobs,
-PostgreSQL, fuzzy matching, universal evidence ontology, or agent-framework coupling. Run 001 is
-planned and unexecuted.
+Version 0.6.0 includes an experimental Crossref feasibility adapter, but does not adopt it as a
+permanent secondary provider or authorize Run 001 execution. It adds no billing, authentication,
+tenancy, distributed jobs, PostgreSQL, fuzzy matching, universal evidence ontology, or
+agent-framework coupling. Run 001 is planned and unexecuted.
