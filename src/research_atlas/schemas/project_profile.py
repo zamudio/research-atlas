@@ -1,4 +1,4 @@
-"""Generic project and optional consumer translation profile schemas."""
+"""Generic project and optional evidence-application profile schemas."""
 
 from pathlib import Path
 from typing import Self
@@ -12,7 +12,6 @@ class Scope(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    age: tuple[str, ...] = ()
     population: tuple[str, ...] = ()
     domain: tuple[str, ...] = ()
 
@@ -40,22 +39,22 @@ class ProjectProfile(BaseModel):
         return cls.model_validate(raw)
 
 
-class TranslationProfile(BaseModel):
+class EvidenceApplicationProfile(BaseModel):
     """Optional consumer destinations and constraints for applying evidence."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     schema_version: str
     project_id: str = Field(min_length=1)
-    consumer_name: str = Field(min_length=1)
+    application_name: str = Field(min_length=1)
     destinations: tuple[str, ...] = Field(min_length=1)
     constraints: tuple[str, ...] = Field(min_length=1)
 
     @classmethod
     def from_yaml(cls, path: Path) -> Self:
-        """Load and validate an optional translation profile from YAML."""
+        """Load and validate an optional evidence application profile from YAML."""
 
         raw = yaml.safe_load(path.read_text(encoding="utf-8"))
         if not isinstance(raw, dict):
-            raise ValueError("Translation profile YAML must contain a mapping")
+            raise ValueError("Evidence application profile YAML must contain a mapping")
         return cls.model_validate(raw)

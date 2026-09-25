@@ -8,6 +8,7 @@ from typing import Literal, Self
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from research_atlas.domain.execution import SearchParameter
 from research_atlas.domain.versioning import ProtocolReference
 
 
@@ -45,17 +46,30 @@ class SearchSpec(BaseModel):
     provider_id: str | None = None
     operation_id: str | None = None
     exact_query: str | None = None
-    filters: tuple[str, ...] = ()
+    parameters: tuple[SearchParameter, ...] = ()
     requested_limit: int | None = Field(default=None, gt=0)
 
     @model_validator(mode="after")
     def validate_execution_ready(self) -> Self:
-        if self.execution_ready and not all(
-            value is not None for value in (self.provider_id, self.operation_id, self.exact_query)
-        ):
-            raise ValueError(
-                "execution-ready search specs require provider_id, operation_id, and exact_query"
-            )
+        if self.execution_ready:
+            required = {
+                "provider_id": self.provider_id,
+                "operation_id": self.operation_id,
+                "exact_query": self.exact_query,
+            }
+            blank = [name for name, value in required.items() if value is None or not value.strip()]
+            if blank:
+                raise ValueError(
+                    "execution-ready search specs require non-blank provider_id, operation_id, "
+                    "and exact_query"
+                )
+            if any(
+                not parameter.name.strip() or not parameter.value.strip()
+                for parameter in self.parameters
+            ):
+                raise ValueError(
+                    "execution-ready search parameters require non-blank names and values"
+                )
         return self
 
 
@@ -134,7 +148,7 @@ class RunDefinition(BaseModel):
     expected_outputs: tuple[str, ...] = Field(min_length=1)
     limitations: tuple[str, ...] = ()
     epistemic_only: bool = True
-    translation_boundary: str | None = None
+    application_boundary: str | None = None
 
     @model_validator(mode="after")
     def validate_stable_identities(self) -> Self:
@@ -153,8 +167,8 @@ class RunDefinition(BaseModel):
             spec.execution_ready for spec in self.search_plan.search_specs
         ):
             raise ValueError("approved run definitions require execution-ready search specs")
-        if not self.epistemic_only and not self.translation_boundary:
-            raise ValueError("translation-capable runs require a translation_boundary")
+        if not self.epistemic_only and not self.application_boundary:
+            raise ValueError("application-capable runs require an application_boundary")
         return self
 
     @classmethod

@@ -39,4 +39,4 @@ study and source link. The assessment's human-readable claim states exactly what
 being used to assess; optional construct links provide indexing and context rather than ownership.
 Uncertainty, limitations, and generalizability are first-class fields. A later assessment may
 supersede an earlier one, but the earlier version and its source links remain reproducible.
-Later application translation may reference an assessment, but must not mutate or rewrite it.
+Later evidence application may reference an assessment, but must not mutate or rewrite it.

@@ -37,10 +37,10 @@ Across the source and its studies, capture:
 12. replication and generalization notes;
 13. follow-up questions.
 
-When a later, separately scoped application-translation stage is performed, also record consumer
+When a later, separately scoped evidence-application stage is performed, also record consumer
 observability, candidate raw signals, inference risks and confounders, plausible actions,
 and a destination from the project-supplied destination vocabulary (or no destination). These
-translation fields are not required for every finding or every evidence assessment.
+application fields are not required for every finding or every evidence assessment.
 
 Every study, construct, measurement, intervention, finding, evidence assessment, application
 candidate, and decision implication records its creation run, time, creation method, optional

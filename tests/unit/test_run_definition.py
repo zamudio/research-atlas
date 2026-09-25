@@ -49,6 +49,32 @@ def test_exact_query_text_is_preserved_byte_for_character() -> None:
     assert parsed.search_plan.search_specs[0].exact_query == query
 
 
+@pytest.mark.parametrize(
+    ("field", "value"),
+    (
+        ("provider_id", "   "),
+        ("operation_id", "\t"),
+        ("exact_query", " \r\n "),
+    ),
+)
+def test_execution_ready_search_spec_rejects_blank_required_values(field: str, value: str) -> None:
+    definition = RunDefinition.from_yaml(RUN_DEFINITION_PATH)
+    payload = definition.model_dump(mode="json")
+    spec = payload["search_plan"]["search_specs"][0]
+    spec.update(
+        {
+            "execution_ready": True,
+            "provider_id": "openalex",
+            "operation_id": "openalex.search",
+            "exact_query": "query",
+            field: value,
+        }
+    )
+
+    with pytest.raises(ValidationError, match="non-blank provider_id"):
+        RunDefinition.model_validate(payload)
+
+
 def test_approved_definition_rejects_unapproved_search_specs() -> None:
     definition = RunDefinition.from_yaml(RUN_DEFINITION_PATH)
     payload = definition.model_dump(mode="json")

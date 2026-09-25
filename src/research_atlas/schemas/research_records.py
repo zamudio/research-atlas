@@ -82,7 +82,8 @@ class ResearchRecords(BaseModel):
             if duplicates:
                 errors.append(f"duplicate {label} IDs: {sorted(map(str, duplicates))}")
 
-        source_ids = {record.source_id for record in self.sources}
+        sources_by_id = {record.source_id: record for record in self.sources}
+        source_ids = set(sources_by_id)
         studies_by_id = {record.study_id: record for record in self.studies}
         study_ids = set(studies_by_id)
         construct_ids = {record.construct_id for record in self.constructs}
@@ -201,6 +202,26 @@ class ResearchRecords(BaseModel):
                 errors.append(
                     f"SourceDiscovery {record.discovery_id} requires a succeeded SearchExecution"
                 )
+            source = sources_by_id.get(record.source_id)
+            if execution is not None and source is not None:
+                matching_provider = tuple(
+                    provenance
+                    for provenance in source.provider_provenance
+                    if provenance.provider == execution.provider_id
+                )
+                if not matching_provider:
+                    errors.append(
+                        f"SourceDiscovery {record.discovery_id} source requires "
+                        f"SourceProvenance for provider {execution.provider_id!r}"
+                    )
+                elif record.provider_record_id is not None and not any(
+                    provenance.provider_record_id == record.provider_record_id
+                    for provenance in matching_provider
+                ):
+                    errors.append(
+                        f"SourceDiscovery {record.discovery_id} provider_record_id must exactly "
+                        "match SourceProvenance for its SearchExecution provider"
+                    )
 
         superseded_ids: list[str] = []
         for record in self.screening_decisions:

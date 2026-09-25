@@ -9,6 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from research_atlas.domain.versioning import ProtocolReference
 from research_atlas.schemas.research_records import ResearchRecords
+from research_atlas.schemas.run_definition import RunDefinition
 
 
 class ContentFile(BaseModel):
@@ -113,12 +114,22 @@ class ExportBundleManifest(BaseModel):
         )
 
 
+class RunDefinitionSnapshot(BaseModel):
+    """A validated run definition plus its portable project-owned reference."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    reference: str = Field(min_length=1)
+    definition: RunDefinition
+
+
 class ExportBundle(BaseModel):
     """In-memory representation that can be serialized into a static bundle."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     manifest: ExportBundleManifest
+    run_definitions: tuple[RunDefinitionSnapshot, ...]
     records: ResearchRecords
 
     @model_validator(mode="after")
@@ -144,9 +155,47 @@ class ExportBundle(BaseModel):
                 f"{missing_run_ids}"
             )
 
+        definition_ids = [snapshot.definition.run_id for snapshot in self.run_definitions]
+        if len(definition_ids) != len(set(definition_ids)):
+            raise ValueError("bundled RunDefinition run_id values must be unique")
+        definitions_by_run_id = {
+            snapshot.definition.run_id: snapshot for snapshot in self.run_definitions
+        }
+        if tuple(definition_ids) != self.manifest.contributing_run_ids:
+            raise ValueError(
+                "bundled RunDefinition run IDs and order must exactly match manifest "
+                "contributing_run_ids"
+            )
+
         run_metadata_errors: list[str] = []
         for run_id in self.manifest.contributing_run_ids:
             run = runs_by_id[run_id]
+            snapshot = definitions_by_run_id[run_id]
+            definition = snapshot.definition
+            if definition.definition_status != "approved":
+                run_metadata_errors.append(
+                    f"contributing ResearchRun {run_id} requires an approved RunDefinition"
+                )
+            if definition.records_schema_version != self.records.schema_version:
+                run_metadata_errors.append(
+                    f"contributing ResearchRun {run_id} RunDefinition records_schema_version "
+                    "must match bundled records schema_version"
+                )
+            for field_name, run_value, definition_value in (
+                ("project_id", run.project_id, definition.project_id),
+                (
+                    "definition_schema_version",
+                    run.definition_schema_version,
+                    definition.schema_version,
+                ),
+                ("definition_reference", run.definition_reference, snapshot.reference),
+                ("definition_fingerprint", run.definition_fingerprint, definition.fingerprint()),
+            ):
+                if run_value != definition_value:
+                    run_metadata_errors.append(
+                        f"contributing ResearchRun {run_id} {field_name} must match bundled "
+                        f"RunDefinition; expected {definition_value!r}, got {run_value!r}"
+                    )
             for field_name, run_value, manifest_value in (
                 ("project_id", run.project_id, self.manifest.project_id),
                 (
@@ -164,6 +213,51 @@ class ExportBundle(BaseModel):
                     )
         if run_metadata_errors:
             raise ValueError("; ".join(run_metadata_errors))
+
+        search_specs_by_run_id = {
+            run_id: {
+                spec.search_spec_id: spec for spec in snapshot.definition.search_plan.search_specs
+            }
+            for run_id, snapshot in definitions_by_run_id.items()
+        }
+        execution_errors: list[str] = []
+        for execution in self.records.search_executions:
+            specs = search_specs_by_run_id.get(execution.run_id)
+            if specs is None:
+                execution_errors.append(
+                    f"SearchExecution {execution.search_execution_id} has no bundled RunDefinition"
+                )
+                continue
+            spec = specs.get(execution.search_spec_id)
+            if spec is None:
+                execution_errors.append(
+                    f"SearchExecution {execution.search_execution_id} references missing "
+                    f"SearchSpec {execution.search_spec_id!r}"
+                )
+                continue
+            for field_name, execution_value, spec_value in (
+                ("provider_id", execution.provider_id, spec.provider_id),
+                ("operation_id", execution.operation_id, spec.operation_id),
+                ("exact_query", execution.exact_query, spec.exact_query),
+                ("parameters", execution.parameters, spec.parameters),
+            ):
+                if execution_value != spec_value:
+                    execution_errors.append(
+                        f"SearchExecution {execution.search_execution_id} {field_name} must match "
+                        f"approved SearchSpec {execution.search_spec_id}; expected {spec_value!r}, "
+                        f"got {execution_value!r}"
+                    )
+            if (
+                spec.requested_limit is not None
+                and execution.requested_limit != spec.requested_limit
+            ):
+                execution_errors.append(
+                    f"SearchExecution {execution.search_execution_id} requested_limit must match "
+                    f"approved SearchSpec {execution.search_spec_id}; expected "
+                    f"{spec.requested_limit!r}, got {execution.requested_limit!r}"
+                )
+        if execution_errors:
+            raise ValueError("; ".join(execution_errors))
         return self
 
 

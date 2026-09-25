@@ -1,4 +1,4 @@
-"""Optional evidence-to-application translation records."""
+"""Optional evidence-application records."""
 
 from dataclasses import dataclass
 

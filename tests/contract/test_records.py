@@ -11,6 +11,7 @@ from research_atlas.application.export.bundle import (
     ExportBundle,
     ExportBundleManifest,
     ExportCounts,
+    RunDefinitionSnapshot,
 )
 from research_atlas.domain.constructs import (
     CandidateObservable,
@@ -37,6 +38,7 @@ from research_atlas.domain.studies import (
 )
 from research_atlas.domain.versioning import ProtocolReference
 from research_atlas.schemas.research_records import ResearchRecords
+from research_atlas.schemas.run_definition import RunDefinition
 
 SOURCE_ID = UUID("19ab3dc6-f09f-49df-aadc-357e0746658b")
 OTHER_SOURCE_ID = UUID("56e2d281-e693-4949-b0ff-268afbc250b1")
@@ -51,9 +53,83 @@ PROTOCOL_REFERENCES = (
     ProtocolReference("screening", "0.1", "screening"),
     ProtocolReference("evidence-assessment", "0.1", "synthesis"),
 )
+DEFINITION_REFERENCE = "projects/contract-test/runs/example.yaml"
+
+
+def representative_definition() -> RunDefinition:
+    return RunDefinition.model_validate(
+        {
+            "schema_version": "0.1",
+            "records_schema_version": "0.4",
+            "definition_status": "approved",
+            "project_id": "contract-test",
+            "run_id": "run-contract-test",
+            "label": "Contract test",
+            "run_type": "test",
+            "purpose": "Exercise portable bundle integrity.",
+            "research_questions": [{"question_id": "RQ1", "text": "What is supported?"}],
+            "scope": {},
+            "search_plan": {
+                "strategy": "Execute three approved logical searches.",
+                "search_specs": [
+                    {
+                        "search_spec_id": "spec-1",
+                        "label": "First search",
+                        "query_intent": "First intent",
+                        "execution_ready": True,
+                        "provider_id": "openalex",
+                        "operation_id": "openalex.search",
+                        "exact_query": '"exact query one"',
+                        "parameters": [{"name": "filter", "value": "type:review"}],
+                        "requested_limit": 20,
+                    },
+                    {
+                        "search_spec_id": "spec-2",
+                        "label": "Second search",
+                        "query_intent": "Second intent",
+                        "execution_ready": True,
+                        "provider_id": "openalex",
+                        "operation_id": "openalex.search",
+                        "exact_query": '"exact query two"',
+                        "requested_limit": 20,
+                    },
+                    {
+                        "search_spec_id": "spec-3",
+                        "label": "Third search",
+                        "query_intent": "Third intent",
+                        "execution_ready": True,
+                        "provider_id": "semantic_scholar",
+                        "operation_id": "semantic_scholar.bulk",
+                        "exact_query": '"exact query three"',
+                        "requested_limit": 20,
+                    },
+                ],
+            },
+            "screening_plan": {
+                "stages": ["relevance"],
+                "inclusion_criteria": ["Relevant"],
+            },
+            "stopping_rule": {"rule_type": "complete", "description": "Test complete."},
+            "protocol_references": [
+                {
+                    "protocol_id": reference.protocol_id,
+                    "version": reference.version,
+                    "phase": reference.phase,
+                }
+                for reference in PROTOCOL_REFERENCES
+            ],
+            "taxonomy": {
+                "reference": "projects/contract-test/taxonomy.md",
+                "version": "0.1",
+            },
+            "evidence_strategy": {"strategy": "Assess evidence."},
+            "expected_outputs": ["records"],
+        }
+    )
 
 
 def representative_records() -> ResearchRecords:
+    definition = representative_definition()
     provenance = RecordProvenance(
         created_in_run_id="run-contract-test",
         created_at=NOW,
@@ -68,7 +144,10 @@ def representative_records() -> ResearchRecords:
         authors=("A. Researcher",),
         year=2025,
         source_type="journal article",
-        provider_provenance=(SourceProvenance("reference-library", "source-1"),),
+        provider_provenance=(
+            SourceProvenance("reference-library", "source-1"),
+            SourceProvenance("openalex", "W1"),
+        ),
     )
     other_source = SourceRecord(
         source_id=OTHER_SOURCE_ID,
@@ -184,8 +263,8 @@ def representative_records() -> ResearchRecords:
         run_id="run-contract-test",
         project_id="contract-test",
         definition_schema_version="0.1",
-        definition_fingerprint="a" * 64,
-        definition_reference="projects/contract-test/runs/example.yaml",
+        definition_fingerprint=definition.fingerprint(),
+        definition_reference=DEFINITION_REFERENCE,
         status="completed",
         protocol_references=PROTOCOL_REFERENCES,
         taxonomy_reference="projects/contract-test/taxonomy.md",
@@ -302,19 +381,35 @@ def representative_manifest(records: ResearchRecords) -> ExportBundleManifest:
     )
 
 
+def representative_bundle(records: ResearchRecords | None = None) -> ExportBundle:
+    records = records or representative_records()
+    return ExportBundle(
+        manifest=representative_manifest(records),
+        run_definitions=(
+            RunDefinitionSnapshot(
+                reference=DEFINITION_REFERENCE,
+                definition=representative_definition(),
+            ),
+        ),
+        records=records,
+    )
+
+
 def test_records_v04_round_trip_and_export_counts() -> None:
     records = representative_records()
     restored = ResearchRecords.model_validate_json(records.model_dump_json())
-    bundle = ExportBundle(manifest=representative_manifest(records), records=records)
+    bundle = representative_bundle(records)
+    bundle_restored = ExportBundle.model_validate_json(bundle.model_dump_json())
 
     assert restored == records
+    assert bundle_restored == bundle
     assert bundle.manifest.counts == ExportCounts.from_records(records)
     assert bundle.manifest.counts.search_executions == 3
     assert bundle.manifest.counts.source_discoveries == 2
     assert bundle.manifest.counts.screening_decisions == 3
 
 
-def test_construct_is_epistemic_and_translation_chain_is_optional() -> None:
+def test_construct_is_epistemic_and_application_chain_is_optional() -> None:
     records = representative_records()
     construct = records.constructs[0]
 
@@ -380,6 +475,24 @@ def test_source_discovery_retains_multi_query_provenance() -> None:
         "search-1",
         "search-2",
     }
+
+
+def test_source_discovery_requires_search_provider_provenance() -> None:
+    payload: dict[str, Any] = representative_records().model_dump(mode="json")
+    payload["sources"][0]["provider_provenance"] = [
+        {"provider": "reference-library", "provider_record_id": "source-1"}
+    ]
+
+    with pytest.raises(ValidationError, match="requires SourceProvenance for provider 'openalex'"):
+        ResearchRecords.model_validate(payload)
+
+
+def test_source_discovery_provider_record_id_must_match_provider_provenance() -> None:
+    payload: dict[str, Any] = representative_records().model_dump(mode="json")
+    payload["source_discoveries"][0]["provider_record_id"] = "different-record"
+
+    with pytest.raises(ValidationError, match="provider_record_id must exactly match"):
+        ResearchRecords.model_validate(payload)
 
 
 @pytest.mark.parametrize(
@@ -461,7 +574,7 @@ def test_provenance_run_link_is_validated_for_screening() -> None:
         ResearchRecords.model_validate(payload)
 
 
-def test_extensible_protocol_references_round_trip_without_translation_protocol() -> None:
+def test_extensible_protocol_references_round_trip_without_application_protocol() -> None:
     records = representative_records()
     restored = ResearchRecords.model_validate_json(records.model_dump_json())
 
@@ -478,12 +591,24 @@ def test_export_bundle_rejects_inconsistent_manifest() -> None:
     bad_counts = representative_manifest(records).model_dump(mode="json")
     bad_counts["counts"]["findings"] = 99
     with pytest.raises(ValidationError, match="manifest counts must match records"):
-        ExportBundle.model_validate({"manifest": bad_counts, "records": records})
+        ExportBundle.model_validate(
+            {
+                "manifest": bad_counts,
+                "run_definitions": representative_bundle(records).run_definitions,
+                "records": records,
+            }
+        )
 
     bad_runs = representative_manifest(records).model_dump(mode="json")
     bad_runs["contributing_run_ids"] = ["missing-run"]
     with pytest.raises(ValidationError, match="reference missing ResearchRun IDs"):
-        ExportBundle.model_validate({"manifest": bad_runs, "records": records})
+        ExportBundle.model_validate(
+            {
+                "manifest": bad_runs,
+                "run_definitions": representative_bundle(records).run_definitions,
+                "records": records,
+            }
+        )
 
 
 def test_export_bundle_rejects_run_protocol_mismatch() -> None:
@@ -501,7 +626,69 @@ def test_export_bundle_rejects_run_protocol_mismatch() -> None:
     )
 
     with pytest.raises(ValidationError, match="protocol_references must match"):
-        ExportBundle(manifest=representative_manifest(records), records=mismatched)
+        representative_bundle(mismatched)
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    (
+        ("definition_schema_version", "different"),
+        ("definition_reference", "different.yaml"),
+        ("definition_fingerprint", "b" * 64),
+    ),
+)
+def test_export_bundle_rejects_run_definition_identity_mismatch(field: str, value: str) -> None:
+    records = representative_records()
+    mismatched_run = replace(records.research_runs[0], **{field: value})
+    mismatched = records.model_copy(update={"research_runs": (mismatched_run,)})
+
+    with pytest.raises(ValidationError, match=f"{field} must match bundled RunDefinition"):
+        representative_bundle(mismatched)
+
+
+def test_export_bundle_rejects_tampered_run_definition_snapshot() -> None:
+    bundle = representative_bundle()
+    changed = representative_definition().model_copy(update={"label": "Changed definition"})
+    snapshots = (RunDefinitionSnapshot(reference=DEFINITION_REFERENCE, definition=changed),)
+
+    with pytest.raises(ValidationError, match="definition_fingerprint must match bundled"):
+        ExportBundle(manifest=bundle.manifest, run_definitions=snapshots, records=bundle.records)
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    (
+        ("search_spec_id", "missing-spec"),
+        ("provider_id", "different-provider"),
+        ("operation_id", "different.operation"),
+        ("exact_query", '"different query"'),
+        ("parameters", (SearchParameter("filter", "different"),)),
+        ("requested_limit", 10),
+    ),
+)
+def test_export_bundle_rejects_search_execution_mismatch(
+    field: str, value: str | int | tuple[SearchParameter, ...]
+) -> None:
+    records = representative_records()
+    changed = replace(records.search_executions[2], **{field: value})
+    mismatched = records.model_copy(
+        update={"search_executions": (*records.search_executions[:2], changed)}
+    )
+
+    expected = (
+        "references missing SearchSpec" if field == "search_spec_id" else "must match approved"
+    )
+    with pytest.raises(ValidationError, match=expected):
+        representative_bundle(mismatched)
+
+
+def test_export_bundle_requires_approved_definition() -> None:
+    bundle = representative_bundle()
+    planned = representative_definition().model_copy(update={"definition_status": "planned"})
+    snapshots = (RunDefinitionSnapshot(reference=DEFINITION_REFERENCE, definition=planned),)
+
+    with pytest.raises(ValidationError, match="requires an approved RunDefinition"):
+        ExportBundle(manifest=bundle.manifest, run_definitions=snapshots, records=bundle.records)
 
 
 def test_frozen_domain_records_have_no_mutable_containers() -> None:

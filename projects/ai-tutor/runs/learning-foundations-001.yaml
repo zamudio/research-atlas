@@ -146,6 +146,6 @@ limitations:
     This is an internal structured landscape review, not a publication-grade systematic review,
     and is not independently duplicated by multiple human reviewers.
 epistemic_only: true
-translation_boundary: >-
+application_boundary: >-
   This run ends at evidence synthesis. Any ApplicationCandidate or DecisionImplication is created
-  later under a separate translation process and cannot mutate an EvidenceAssessment.
+  later under a separate evidence application process and cannot mutate an EvidenceAssessment.

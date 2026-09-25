@@ -1,6 +1,6 @@
 schema_version: "0.1"
 project_id: "ai-tutor"
-consumer_name: "AI Tutor"
+application_name: "AI Tutor"
 destinations:
   - "state"
   - "policy"
@@ -10,4 +10,4 @@ destinations:
 constraints:
   - "Keep observations distinct from inferences."
   - "Do not infer unobservable traits or encode unsupported learning styles."
-  - "Translation must not mutate or rewrite an EvidenceAssessment."
+  - "Evidence application must not mutate or rewrite an EvidenceAssessment."
