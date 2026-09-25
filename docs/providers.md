@@ -25,8 +25,9 @@ text to avoid that provider behavior.
 
 Crossref implements the same port as an **experimental feasibility adapter**, `CrossrefWorksSearch`
 (`crossref.works`). It is for bibliographic discovery and metadata verification, not a replacement
-for semantic search. Permanent secondary-provider status is pending independent diff review and
-small local canaries; no Run 001 execution is part of this spike.
+for semantic search. Independent diff review and small local canaries have completed successfully;
+Crossref remains experimental pending an explicit permanent-role decision. No Run 001 execution is
+part of this spike.
 
 ## Experimental Crossref access and mapping
 

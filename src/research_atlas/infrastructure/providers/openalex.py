@@ -1,7 +1,10 @@
 """OpenAlex discovery adapter."""
 
-from collections.abc import Mapping
+import asyncio
+from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
+from threading import Lock
+from time import monotonic
 from typing import ClassVar, cast
 
 import httpx
@@ -9,7 +12,50 @@ import httpx
 from research_atlas.application.ports.literature_source import LiteratureQuery
 from research_atlas.application.source_identity import identified_source
 from research_atlas.domain.studies import ExternalIdentifier, SourceProvenance, SourceRecord
-from research_atlas.infrastructure.providers._http import get_with_retries
+from research_atlas.infrastructure.providers._http import Sleep, get_with_retries
+
+OPENALEX_SEMANTIC_MINIMUM_INTERVAL_SECONDS = 1.1
+OPENALEX_SEMANTIC_MAXIMUM_QUERY_CHARACTERS = 2_000
+
+
+class OpenAlexSemanticRequestCoordinator:
+    """Grant semantic request starts with a process-local monotonic minimum interval."""
+
+    def __init__(
+        self,
+        minimum_interval_seconds: float,
+        *,
+        clock: Callable[[], float] = monotonic,
+        sleep: Sleep = asyncio.sleep,
+    ) -> None:
+        if minimum_interval_seconds <= 0:
+            raise ValueError("minimum interval must be positive")
+        self._minimum_interval_seconds = minimum_interval_seconds
+        self._clock = clock
+        self._sleep = sleep
+        self._start_lock = Lock()
+        self._last_start_at: float | None = None
+
+    async def wait(self) -> None:
+        """Sleep and re-check until this caller can atomically claim a request start."""
+
+        while True:
+            with self._start_lock:
+                now = self._clock()
+                delay = (
+                    0.0
+                    if self._last_start_at is None
+                    else self._last_start_at + self._minimum_interval_seconds - now
+                )
+                if delay <= 0:
+                    self._last_start_at = now
+                    return
+            await self._sleep(delay)
+
+
+_DEFAULT_SEMANTIC_REQUEST_COORDINATOR = OpenAlexSemanticRequestCoordinator(
+    OPENALEX_SEMANTIC_MINIMUM_INTERVAL_SECONDS
+)
 
 
 class OpenAlexLiteratureSource:
@@ -160,10 +206,27 @@ class OpenAlexSemanticSearch(OpenAlexLiteratureSource):
         }
     )
 
+    def __init__(
+        self,
+        api_key: str | None = None,
+        client: httpx.AsyncClient | None = None,
+        *,
+        request_coordinator: OpenAlexSemanticRequestCoordinator | None = None,
+        retry_sleep: Sleep = asyncio.sleep,
+    ) -> None:
+        super().__init__(api_key, client)
+        self._request_coordinator = request_coordinator or _DEFAULT_SEMANTIC_REQUEST_COORDINATOR
+        self._retry_sleep = retry_sleep
+
     async def search(self, query: LiteratureQuery) -> tuple[SourceRecord, ...]:
         if query.limit > self._maximum_results:
             raise ValueError(
                 f"OpenAlex semantic search supports at most {self._maximum_results} results"
+            )
+        if len(query.query) > OPENALEX_SEMANTIC_MAXIMUM_QUERY_CHARACTERS:
+            raise ValueError(
+                "OpenAlex semantic search input must be at most "
+                f"{OPENALEX_SEMANTIC_MAXIMUM_QUERY_CHARACTERS:,} characters"
             )
         return await super().search(query)
 
@@ -190,6 +253,8 @@ class OpenAlexSemanticSearch(OpenAlexLiteratureSource):
             f"{self.base_url}/works",
             params=request_params,
             headers=headers,
+            sleep=self._retry_sleep,
+            before_request=self._request_coordinator.wait,
         )
         payload = cast(Mapping[str, object], response.json())
         results = payload.get("results", [])
