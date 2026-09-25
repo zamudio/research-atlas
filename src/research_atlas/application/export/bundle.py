@@ -153,6 +153,17 @@ class ExportBundle(BaseModel):
                 "manifest contributing_run_ids reference missing ResearchRun IDs: "
                 f"{missing_run_ids}"
             )
+        contributing_run_ids = set(self.manifest.contributing_run_ids)
+        unexpected_run_ids = [
+            run.run_id
+            for run in self.records.research_runs
+            if run.run_id not in contributing_run_ids
+        ]
+        if unexpected_run_ids:
+            raise ValueError(
+                "bundled ResearchRun IDs are absent from manifest contributing_run_ids: "
+                f"{unexpected_run_ids}"
+            )
 
         definition_ids = [snapshot.definition.run_id for snapshot in self.run_definitions]
         if len(definition_ids) != len(set(definition_ids)):

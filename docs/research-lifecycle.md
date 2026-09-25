@@ -25,6 +25,14 @@ may be found by multiple searches or providers. `discovery_record_id`, when pres
 discovery system. `SourceProvenance` separately records where normalized source metadata came from;
 it need not name the discovery provider or share its record ID.
 
+Application discovery preserves a temporary membership for each search/source pair before an
+execution layer creates `SourceDiscovery`. The membership retains the zero-based requested-search
+index, the provider's one-based result position, the final exact-merged source ID, and an
+unambiguous provider-local record ID when available. Repeated appearances within one search keep
+the earliest position; appearances across searches remain separate. Dry-run serialization remains
+metadata-only and does not expose execution-domain records. Author/person reconciliation is
+intentionally deferred to persistence design.
+
 ## 3. Screen and assess evidence
 
 `ScreeningDecision` is append-only. A correction creates a new decision linked by
@@ -48,7 +56,8 @@ interpret evidence for a consumer decision but cannot modify, relabel, or replac
 ## 5. Export a portable snapshot
 
 An `ExportBundle` contains a manifest, records, and each contributing run's validated definition
-snapshot. Bundle schema and records schema are identified independently. Validation recomputes
-fingerprints and compares every execution to its approved search spec, including exact generic
-parameters and requested limit. A serialized and restored bundle therefore retains both intent
-and execution integrity.
+snapshot. Manifest contributing run IDs and bundled `ResearchRun` IDs must have exactly the same
+membership, while only the run-definition snapshots inherit manifest ordering. Bundle schema and
+records schema are identified independently. Validation recomputes fingerprints and compares every
+execution to its approved search spec, including exact generic parameters and requested limit. A
+serialized and restored bundle therefore retains both intent and execution integrity.

@@ -5,6 +5,7 @@ import pytest
 from research_atlas.application.discovery import (
     DiscoverSources,
     DiscoveryFailedError,
+    DiscoveryMembership,
     serialize_report,
 )
 from research_atlas.application.ports.literature_source import (
@@ -78,6 +79,7 @@ def test_openalex_success_is_preserved_when_semantic_scholar_fails() -> None:
     assert report.provider_outcomes[1].error_type == "http_status"
     assert report.provider_outcomes[1].status_code == 429
     assert report.provider_outcomes[1].error_message == "throttled"
+    assert report.memberships == (DiscoveryMembership(0, report.sources[0].source_id, 1, "W1"),)
 
 
 def test_semantic_scholar_success_is_preserved_when_openalex_fails() -> None:
@@ -168,6 +170,149 @@ def test_repeated_operation_id_supports_multiple_search_requests() -> None:
         "second exact query",
     ]
     assert len(report.sources) == 2
+    assert [membership.search_index for membership in report.memberships] == [0, 1]
+
+
+def test_unique_search_memberships_preserve_positions_and_final_source_ids() -> None:
+    source = FakeLiteratureSource(
+        "openalex",
+        (
+            _record("openalex", "W1", "10.1/first"),
+            _record("openalex", "W2", "10.1/second"),
+        ),
+    )
+
+    report = asyncio.run(DiscoverSources((_request(source),)).execute())
+
+    assert report.memberships == (
+        DiscoveryMembership(0, report.sources[0].source_id, 1, "W1"),
+        DiscoveryMembership(0, report.sources[1].source_id, 2, "W2"),
+    )
+    assert {membership.source_id for membership in report.memberships} == {
+        source.source_id for source in report.sources
+    }
+
+
+def test_shared_source_keeps_each_search_membership_and_original_position() -> None:
+    shared_doi = "10.1/shared"
+    searches: list[LiteratureSearchRequest] = []
+    for search_index, position in enumerate((2, 7, 1)):
+        records = tuple(
+            _record("openalex", f"W{search_index}-{index}", shared_doi)
+            if index == position
+            else _record(
+                "openalex",
+                f"W{search_index}-{index}",
+                f"10.1/filler-{search_index}-{index}",
+            )
+            for index in range(1, position + 1)
+        )
+        searches.append(
+            _request(
+                FakeLiteratureSource("openalex", records, operation_id="openalex.search"),
+                f"exact query {search_index}",
+            )
+        )
+
+    report = asyncio.run(DiscoverSources(tuple(searches)).execute())
+    shared_source = next(
+        source
+        for source in report.sources
+        if ExternalIdentifier("doi", shared_doi) in source.external_identifiers
+    )
+    memberships = [
+        membership
+        for membership in report.memberships
+        if membership.source_id == shared_source.source_id
+    ]
+
+    assert (
+        len(
+            [
+                source
+                for source in report.sources
+                if ExternalIdentifier("doi", shared_doi) in source.external_identifiers
+            ]
+        )
+        == 1
+    )
+    assert [membership.search_index for membership in memberships] == [0, 1, 2]
+    assert [membership.result_position for membership in memberships] == [2, 7, 1]
+    assert [membership.discovery_record_id for membership in memberships] == [
+        "W0-2",
+        "W1-7",
+        "W2-1",
+    ]
+
+
+def test_failed_search_contributes_no_memberships() -> None:
+    failed = FakeLiteratureSource("openalex", error=RuntimeError("unavailable"))
+    successful = FakeLiteratureSource(
+        "semantic_scholar",
+        (_record("semantic_scholar", "S1", "10.1/one"),),
+    )
+
+    report = asyncio.run(DiscoverSources((_request(failed), _request(successful))).execute())
+
+    assert report.memberships == (DiscoveryMembership(1, report.sources[0].source_id, 1, "S1"),)
+
+
+def test_same_search_duplicate_keeps_earliest_position_and_provider_record_id() -> None:
+    source = FakeLiteratureSource(
+        "openalex",
+        (
+            _record("openalex", "W-early", "10.1/shared"),
+            _record("openalex", "W-late", "10.1/shared"),
+        ),
+    )
+
+    report = asyncio.run(DiscoverSources((_request(source),)).execute())
+
+    assert len(report.sources) == 1
+    assert report.memberships == (
+        DiscoveryMembership(0, report.sources[0].source_id, 1, "W-early"),
+    )
+
+
+def test_membership_record_id_stays_with_its_original_provider_result() -> None:
+    openalex = FakeLiteratureSource("openalex", (_record("openalex", "W1", "10.1/shared"),))
+    semantic_scholar = FakeLiteratureSource(
+        "semantic_scholar",
+        (_record("semantic_scholar", "S1", "10.1/shared"),),
+    )
+
+    report = asyncio.run(
+        DiscoverSources((_request(openalex), _request(semantic_scholar))).execute()
+    )
+
+    assert len(report.sources) == 1
+    assert [membership.discovery_record_id for membership in report.memberships] == [
+        "W1",
+        "S1",
+    ]
+    assert all(
+        membership.source_id == report.sources[0].source_id for membership in report.memberships
+    )
+
+
+def test_membership_omits_ambiguous_provider_record_id() -> None:
+    ambiguous = identified_source(
+        title="Ambiguous provider result",
+        authors=("A. Author",),
+        year=2023,
+        source_type="article",
+        provenance=(
+            SourceProvenance("openalex", "W1"),
+            SourceProvenance("openalex", "W2"),
+        ),
+        identifiers=(ExternalIdentifier("doi", "10.1/ambiguous"),),
+    )
+
+    report = asyncio.run(
+        DiscoverSources((_request(FakeLiteratureSource("openalex", (ambiguous,))),)).execute()
+    )
+
+    assert report.memberships[0].discovery_record_id is None
 
 
 def test_execution_ready_search_spec_maps_losslessly_to_literature_query() -> None:
@@ -299,3 +444,4 @@ def test_dry_run_report_serialization_includes_provider_health_and_counts() -> N
     ]
     assert payload["sources"][0]["external_identifiers"] == {"doi": ["10.1/one"]}
     assert "research_run" not in payload["sources"][0]
+    assert "memberships" not in payload

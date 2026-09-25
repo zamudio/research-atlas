@@ -703,6 +703,91 @@ def test_export_bundle_rejects_inconsistent_manifest() -> None:
         )
 
 
+def test_export_bundle_rejects_research_run_absent_from_manifest() -> None:
+    records = representative_records()
+    extra_run = replace(records.research_runs[0], run_id="unexpected-run")
+    records_with_extra_run = records.model_copy(
+        update={"research_runs": (*records.research_runs, extra_run)}
+    )
+
+    with pytest.raises(
+        ValidationError,
+        match=r"bundled ResearchRun IDs are absent from manifest contributing_run_ids: "
+        r"\['unexpected-run'\]",
+    ):
+        representative_bundle(records_with_extra_run)
+
+
+def test_export_bundle_run_membership_does_not_require_records_order() -> None:
+    records = representative_records()
+    first_definition = representative_definition()
+    second_definition = first_definition.model_copy(update={"run_id": "second-run"})
+    second_run = replace(
+        records.research_runs[0],
+        run_id="second-run",
+        definition_fingerprint=second_definition.fingerprint(),
+    )
+    reordered_records = records.model_copy(
+        update={"research_runs": (second_run, records.research_runs[0])}
+    )
+    manifest = representative_manifest(reordered_records).model_copy(
+        update={"contributing_run_ids": ("run-contract-test", "second-run")}
+    )
+
+    bundle = ExportBundle(
+        manifest=manifest,
+        run_definitions=(
+            RunDefinitionSnapshot(
+                reference=DEFINITION_REFERENCE,
+                definition=first_definition,
+            ),
+            RunDefinitionSnapshot(
+                reference=DEFINITION_REFERENCE,
+                definition=second_definition,
+            ),
+        ),
+        records=reordered_records,
+    )
+
+    assert [run.run_id for run in bundle.records.research_runs] == [
+        "second-run",
+        "run-contract-test",
+    ]
+
+
+def test_export_bundle_still_requires_run_definition_manifest_order() -> None:
+    records = representative_records()
+    first_definition = representative_definition()
+    second_definition = first_definition.model_copy(update={"run_id": "second-run"})
+    second_run = replace(
+        records.research_runs[0],
+        run_id="second-run",
+        definition_fingerprint=second_definition.fingerprint(),
+    )
+    records_with_second_run = records.model_copy(
+        update={"research_runs": (*records.research_runs, second_run)}
+    )
+    manifest = representative_manifest(records_with_second_run).model_copy(
+        update={"contributing_run_ids": ("run-contract-test", "second-run")}
+    )
+
+    with pytest.raises(ValidationError, match="run IDs and order must exactly match"):
+        ExportBundle(
+            manifest=manifest,
+            run_definitions=(
+                RunDefinitionSnapshot(
+                    reference=DEFINITION_REFERENCE,
+                    definition=second_definition,
+                ),
+                RunDefinitionSnapshot(
+                    reference=DEFINITION_REFERENCE,
+                    definition=first_definition,
+                ),
+            ),
+            records=records_with_second_run,
+        )
+
+
 @pytest.mark.parametrize(
     ("field", "value"),
     (("bundle_schema_version", "0.2"), ("records_schema_version", "0.4")),

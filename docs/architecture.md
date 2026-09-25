@@ -34,9 +34,11 @@ definition is approved. Canonical JSON over the complete validated model produce
 SHA-256 fingerprint.
 
 A `ResearchRun` stores the definition reference, schema version, and fingerprint it executed.
-Every contributing run in an export has exactly one `RunDefinitionSnapshot`. Bundle validation
+Every contributing run in an export has exactly one `RunDefinitionSnapshot`, and the manifest's
+contributing run IDs must exactly match the bundled `ResearchRun` membership. Bundle validation
 requires an approved definition and exact agreement on run ID, project, reference, schema version,
-fingerprint, protocol references, and taxonomy reference/version.
+fingerprint, protocol references, and taxonomy reference/version. Run-definition snapshots retain
+manifest order; `ResearchRecords.research_runs` does not gain an incidental ordering requirement.
 
 Each `SearchExecution` is one logical execution. The bundle verifies that its `search_spec_id`
 exists in the corresponding definition and that provider, operation, exact query, generic
@@ -70,7 +72,11 @@ or application records.
 and screening chains, and invalid append-only screening/evidence supersession. A
 `SourceDiscovery` must agree with its successful `SearchExecution` and run. It records the
 discovery mechanism and may legitimately differ from `SourceProvenance`, which records the origin
-of normalized bibliographic metadata.
+of normalized bibliographic metadata. Before execution records exist, application discovery keeps
+one temporary membership per search and exact source identity, including the provider result
+position and an unambiguous provider-local record ID when available. Exact merging rewrites those
+memberships to the final normalized `SourceRecord.source_id` without turning a dry-run into an
+execution.
 
 `ProtocolReference(protocol_id, version, phase)` keeps protocols independently evolvable.
 `RecordProvenance.creation_method` applies across import, extraction, synthesis, screening, review,
@@ -84,4 +90,5 @@ bundles are immutable portable snapshots; direct package use, local persistence 
 Version 0.6.0 includes an experimental Crossref feasibility adapter, but does not adopt it as a
 permanent secondary provider or authorize Run 001 execution. It adds no billing, authentication,
 tenancy, distributed jobs, PostgreSQL, fuzzy matching, universal evidence ontology, or
-agent-framework coupling. Run 001 is planned and unexecuted.
+agent-framework coupling. Author/person reconciliation remains deferred to persistence design.
+Run 001 is planned and unexecuted.

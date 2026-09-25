@@ -4,6 +4,7 @@ import asyncio
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import TypedDict
+from uuid import UUID
 
 from research_atlas.application.ports.literature_source import (
     LiteratureSearchRequest,
@@ -82,12 +83,23 @@ class SearchSummary:
 
 
 @dataclass(frozen=True, slots=True)
+class DiscoveryMembership:
+    """Temporary link from one requested search result to its merged source."""
+
+    search_index: int
+    source_id: UUID
+    result_position: int
+    discovery_record_id: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class DiscoveryReport:
-    """Normalized sources and observable outcomes from every configured provider."""
+    """Normalized sources, search memberships, and outcomes from every provider."""
 
     searches: tuple[SearchSummary, ...]
     sources: tuple[SourceRecord, ...]
     provider_outcomes: tuple[ProviderOutcome, ...]
+    memberships: tuple[DiscoveryMembership, ...] = ()
 
 
 class DiscoveryFailedError(RuntimeError):
@@ -132,7 +144,13 @@ class DiscoverSources:
         outcomes = tuple(result.outcome for result in results)
         discovered = tuple(record for result in results for record in result.records)
         if not any(outcome.success for outcome in outcomes):
-            raise DiscoveryFailedError(DiscoveryReport(summaries, (), outcomes))
+            raise DiscoveryFailedError(
+                DiscoveryReport(
+                    searches=summaries,
+                    sources=(),
+                    provider_outcomes=outcomes,
+                )
+            )
         merged = merge_sources(discovered)
         by_identity = {
             canonical_identity(record.external_identifiers, record.provider_provenance): record
@@ -143,7 +161,30 @@ class DiscoverSources:
             for record in discovered
         )
         sources = tuple(by_identity[identity] for identity in relevance_order)
-        return DiscoveryReport(summaries, sources, outcomes)
+        memberships: list[DiscoveryMembership] = []
+        for search_index, (search, result) in enumerate(zip(self._searches, results, strict=True)):
+            seen_identities: set[str] = set()
+            for result_position, record in enumerate(result.records, start=1):
+                identity = canonical_identity(
+                    record.external_identifiers, record.provider_provenance
+                )
+                if identity in seen_identities:
+                    continue
+                seen_identities.add(identity)
+                memberships.append(
+                    DiscoveryMembership(
+                        search_index=search_index,
+                        source_id=by_identity[identity].source_id,
+                        result_position=result_position,
+                        discovery_record_id=_provider_record_id(record, search.source.provider_id),
+                    )
+                )
+        return DiscoveryReport(
+            searches=summaries,
+            sources=sources,
+            provider_outcomes=outcomes,
+            memberships=tuple(memberships),
+        )
 
     @staticmethod
     async def _search_provider(
@@ -178,6 +219,22 @@ class DiscoverSources:
             ),
             records,
         )
+
+
+def _provider_record_id(record: SourceRecord, provider: str) -> str | None:
+    """Return the unambiguous provider-local ID from this original search result."""
+
+    normalized_provider = provider.strip().casefold()
+    record_ids = {
+        item.provider_record_id.strip()
+        for item in record.provider_provenance
+        if item.provider.strip().casefold() == normalized_provider
+        and item.provider_record_id
+        and item.provider_record_id.strip()
+    }
+    if len(record_ids) != 1:
+        return None
+    return next(iter(record_ids))
 
 
 def serialize_source(record: SourceRecord) -> SerializedSource:
