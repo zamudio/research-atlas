@@ -208,10 +208,24 @@ class SemanticScholarRelevanceSearch(_SemanticScholarLiteratureSource):
     async def _search(
         self, client: httpx.AsyncClient, query: LiteratureQuery
     ) -> tuple[SourceRecord, ...]:
+        if reserved := {parameter.name for parameter in query.parameters} & {
+            "query",
+            "limit",
+            "fields",
+        }:
+            raise ValueError(
+                "Semantic Scholar relevance adapter manages reserved parameters: "
+                f"{sorted(reserved)}"
+            )
+        request_params = httpx.QueryParams(
+            {"query": query.query, "limit": min(query.limit, 100), "fields": self._fields}
+        )
+        for parameter in query.parameters:
+            request_params = request_params.add(parameter.name, parameter.value)
         response = await self._get(
             client,
             f"{self.base_url}/paper/search",
-            params={"query": query.query, "limit": min(query.limit, 100), "fields": self._fields},
+            params=request_params,
         )
         payload = cast(Mapping[str, object], response.json())
         data = payload.get("data", [])
@@ -233,13 +247,24 @@ class SemanticScholarBulkSearch(_SemanticScholarLiteratureSource):
         self, client: httpx.AsyncClient, query: LiteratureQuery
     ) -> tuple[SourceRecord, ...]:
         params: dict[str, str | int] = {"query": query.query, "fields": self._fields}
+        if reserved := {parameter.name for parameter in query.parameters} & {
+            "query",
+            "fields",
+            "token",
+        }:
+            raise ValueError(
+                f"Semantic Scholar bulk adapter manages reserved parameters: {sorted(reserved)}"
+            )
         records: list[SourceRecord] = []
         seen_tokens: set[str] = set()
         while len(records) < query.limit:
+            request_params = httpx.QueryParams(params)
+            for parameter in query.parameters:
+                request_params = request_params.add(parameter.name, parameter.value)
             response = await self._get(
                 client,
                 f"{self.base_url}/paper/search/bulk",
-                params=params,
+                params=request_params,
             )
             payload = cast(Mapping[str, object], response.json())
             data = payload.get("data", [])

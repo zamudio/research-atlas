@@ -78,6 +78,41 @@ def test_evidence_application_profile_requires_destinations_and_constraints() ->
         )
 
 
+@pytest.mark.parametrize(
+    ("model", "payload", "version"),
+    (
+        (
+            ProjectProfile,
+            {
+                "project_id": "generic",
+                "display_name": "Generic",
+                "research_domain": "generic evidence",
+                "objectives": ["Review evidence."],
+                "constraints_and_principles": ["Preserve provenance."],
+            },
+            "0.3",
+        ),
+        (
+            EvidenceApplicationProfile,
+            {
+                "project_id": "consumer",
+                "application_name": "Consumer",
+                "destinations": ["policy"],
+                "constraints": ["Preserve provenance."],
+            },
+            "0.2",
+        ),
+    ),
+)
+def test_profiles_reject_unsupported_schema_versions(
+    model: type[ProjectProfile] | type[EvidenceApplicationProfile],
+    payload: dict[str, object],
+    version: str,
+) -> None:
+    with pytest.raises(ValidationError):
+        model.model_validate({"schema_version": version, **payload})
+
+
 def test_generic_project_scope_rejects_age_field() -> None:
     with pytest.raises(ValidationError, match="age"):
         ProjectProfile.model_validate(

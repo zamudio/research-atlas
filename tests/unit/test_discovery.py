@@ -13,7 +13,9 @@ from research_atlas.application.ports.literature_source import (
     LiteratureSourceError,
 )
 from research_atlas.application.source_identity import identified_source
+from research_atlas.domain.execution import SearchParameter
 from research_atlas.domain.studies import ExternalIdentifier, SourceProvenance, SourceRecord
+from research_atlas.schemas.run_definition import SearchSpec
 
 
 class FakeLiteratureSource:
@@ -168,6 +170,26 @@ def test_repeated_operation_id_supports_multiple_search_requests() -> None:
     assert len(report.sources) == 2
 
 
+def test_execution_ready_search_spec_maps_losslessly_to_literature_query() -> None:
+    source = FakeLiteratureSource("openalex", operation_id="openalex.search")
+    parameters = (SearchParameter("filter", "type:review"),)
+    spec = SearchSpec(
+        search_spec_id="review-search",
+        label="Review search",
+        query_intent="Find reviews",
+        execution_ready=True,
+        provider_id="openalex",
+        operation_id="openalex.search",
+        exact_query='"example topic"',
+        parameters=parameters,
+        requested_limit=25,
+    )
+
+    request = LiteratureSearchRequest.from_search_spec(source, spec)
+
+    assert request.query == LiteratureQuery('"example topic"', 25, parameters)
+
+
 def test_overlap_across_providers_still_deduplicates() -> None:
     openalex = FakeLiteratureSource("openalex", (_record("openalex", "W1", "10.1/shared"),))
     semantic_scholar = FakeLiteratureSource(
@@ -233,7 +255,13 @@ def test_dry_run_report_serialization_includes_provider_health_and_counts() -> N
     report = asyncio.run(
         DiscoverSources(
             (
-                _request(openalex, '"example phrase" AND review'),
+                LiteratureSearchRequest(
+                    openalex,
+                    LiteratureQuery(
+                        '"example phrase" AND review',
+                        parameters=(SearchParameter("filter", "type:review"),),
+                    ),
+                ),
                 _request(semantic_scholar, '"example phrase" AND review'),
             )
         ).execute()
@@ -245,6 +273,8 @@ def test_dry_run_report_serialization_includes_provider_health_and_counts() -> N
         '"example phrase" AND review',
         '"example phrase" AND review',
     ]
+    assert payload["searches"][0]["parameters"] == [{"name": "filter", "value": "type:review"}]
+    assert payload["searches"][1]["parameters"] == []
     assert payload["normalized_source_count"] == 1
     assert payload["cross_provider_merge_count"] == 0
     assert payload["provider_outcomes"] == [

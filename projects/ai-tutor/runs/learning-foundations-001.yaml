@@ -1,5 +1,5 @@
 schema_version: "0.2"
-records_schema_version: "0.4"
+records_schema_version: "0.5"
 definition_status: "planned"
 project_id: "ai-tutor"
 run_id: "learning-foundations-001"
@@ -50,8 +50,8 @@ scope:
 search_plan:
   strategy: >-
     Develop and approve multiple targeted, operation-appropriate query variants per landscape
-    family. Exact query text, provider, and operation will be added without changing stable
-    search_spec_id values before this definition can be approved or executed.
+    family. These planned placeholders may be revised or replaced as exact provider-specific
+    searches are formulated. SearchSpec identities become stable when the definition is approved.
   planned_sources:
     - "OpenAlex"
     - "Semantic Scholar"

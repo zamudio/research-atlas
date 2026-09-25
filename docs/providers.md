@@ -16,8 +16,14 @@ Canonical source identity prefers DOI, then PMID or arXiv, then provider namespa
 record ID. Only exact normalized stable identities merge; similar titles are not fuzzily merged.
 
 `SourceProvenance` records metadata origin. `SourceDiscovery` records which logical research
-search found that source. A discovery is valid only when the source has provenance for the search
-provider, and any discovery provider record ID exactly matches that provider's provenance entry.
+search found that source. These providers and their record IDs may differ—for example, a source
+can be discovered manually or through Elicit while its normalized metadata comes from Crossref or
+Zotero. `discovery_record_id` belongs to the discovery system and is not matched to metadata
+provenance.
+
+`LiteratureQuery.parameters` carries the same generic `(name, value)` data as `SearchSpec` and
+`SearchExecution`. Each adapter maps those values into its native request parameters; dry-run
+reports retain them for review rather than silently dropping approved logical inputs.
 
 ## Request safety
 

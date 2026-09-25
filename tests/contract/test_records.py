@@ -20,7 +20,12 @@ from research_atlas.domain.constructs import (
     SourcedDefinition,
 )
 from research_atlas.domain.decisions import ApplicationCandidate, DecisionImplication
-from research_atlas.domain.evidence import EvidenceAssessment, EvidenceDimension, FindingRecord
+from research_atlas.domain.evidence import (
+    EvidenceAssessment,
+    EvidenceDimension,
+    FindingRecord,
+    current_evidence_assessments,
+)
 from research_atlas.domain.execution import (
     ScreeningDecision,
     SearchExecution,
@@ -59,8 +64,8 @@ DEFINITION_REFERENCE = "projects/contract-test/runs/example.yaml"
 def representative_definition() -> RunDefinition:
     return RunDefinition.model_validate(
         {
-            "schema_version": "0.1",
-            "records_schema_version": "0.4",
+            "schema_version": "0.2",
+            "records_schema_version": "0.5",
             "definition_status": "approved",
             "project_id": "contract-test",
             "run_id": "run-contract-test",
@@ -106,8 +111,9 @@ def representative_definition() -> RunDefinition:
                 ],
             },
             "screening_plan": {
-                "stages": ["relevance"],
+                "stages": ["relevance", "study-eligibility"],
                 "inclusion_criteria": ["Relevant"],
+                "reason_codes": ["meets_scope"],
             },
             "stopping_rule": {"rule_type": "complete", "description": "Test complete."},
             "protocol_references": [
@@ -262,7 +268,7 @@ def representative_records() -> ResearchRecords:
     run = ResearchRun(
         run_id="run-contract-test",
         project_id="contract-test",
-        definition_schema_version="0.1",
+        definition_schema_version="0.2",
         definition_fingerprint=definition.fingerprint(),
         definition_reference=DEFINITION_REFERENCE,
         status="completed",
@@ -368,15 +374,14 @@ def representative_records() -> ResearchRecords:
 def representative_manifest(records: ResearchRecords) -> ExportBundleManifest:
     return ExportBundleManifest.for_records(
         records,
-        bundle_id="contract-test-0.4",
+        bundle_id="contract-test-0.5",
         generated_at=NOW,
         project_id="contract-test",
         protocol_references=PROTOCOL_REFERENCES,
         taxonomy_reference="projects/contract-test/taxonomy.md",
         taxonomy_version="0.1",
         contributing_run_ids=("run-contract-test",),
-        construct_registry_version="0.4",
-        research_questions=("What does the evidence support?",),
+        construct_registry_version="0.5",
         content_files=(ContentFile(path="records.json", sha256="a" * 64),),
     )
 
@@ -395,7 +400,7 @@ def representative_bundle(records: ResearchRecords | None = None) -> ExportBundl
     )
 
 
-def test_records_v04_round_trip_and_export_counts() -> None:
+def test_records_v05_and_bundle_v01_round_trip_and_export_counts() -> None:
     records = representative_records()
     restored = ResearchRecords.model_validate_json(records.model_dump_json())
     bundle = representative_bundle(records)
@@ -403,10 +408,21 @@ def test_records_v04_round_trip_and_export_counts() -> None:
 
     assert restored == records
     assert bundle_restored == bundle
+    assert bundle.manifest.bundle_schema_version == "0.1"
+    assert bundle.manifest.records_schema_version == "0.5"
+    assert "research_questions" not in bundle.manifest.model_dump()
     assert bundle.manifest.counts == ExportCounts.from_records(records)
     assert bundle.manifest.counts.search_executions == 3
     assert bundle.manifest.counts.source_discoveries == 2
     assert bundle.manifest.counts.screening_decisions == 3
+
+
+def test_records_reject_unsupported_schema_version() -> None:
+    payload = representative_records().model_dump(mode="json")
+    payload["schema_version"] = "0.4"
+
+    with pytest.raises(ValidationError):
+        ResearchRecords.model_validate(payload)
 
 
 def test_construct_is_epistemic_and_application_chain_is_optional() -> None:
@@ -429,6 +445,79 @@ def test_application_chain_references_evidence_without_rewriting_it() -> None:
     assert candidate.observability == "indirect"
     assert candidate.linked_evidence_ids == (records.evidence_assessments[0].evidence_id,)
     assert implication.linked_candidate_ids == (candidate.candidate_id,)
+
+
+def test_evidence_supersession_is_append_only_and_current_state_is_derived() -> None:
+    records = representative_records()
+    original = records.evidence_assessments[0]
+    revised = replace(
+        original,
+        evidence_id="evidence-002",
+        summary="Revised synthesis",
+        supersedes_evidence_id=original.evidence_id,
+    )
+    updated = ResearchRecords.model_validate(
+        records.model_copy(update={"evidence_assessments": (original, revised)}).model_dump(
+            mode="json"
+        )
+    )
+
+    assert current_evidence_assessments(updated.evidence_assessments) == (revised,)
+
+
+@pytest.mark.parametrize(
+    ("supersedes_id", "message"),
+    (
+        ("missing-evidence", "supersedes_evidence_id reference missing IDs"),
+        ("evidence-002", "cannot supersede itself"),
+    ),
+)
+def test_evidence_supersession_rejects_missing_and_self_links(
+    supersedes_id: str, message: str
+) -> None:
+    records = representative_records()
+    revised = replace(
+        records.evidence_assessments[0],
+        evidence_id="evidence-002",
+        supersedes_evidence_id=supersedes_id,
+    )
+    payload = records.model_dump(mode="json")
+    revised_payload = payload["evidence_assessments"][0].copy()
+    revised_payload["evidence_id"] = revised.evidence_id
+    revised_payload["supersedes_evidence_id"] = revised.supersedes_evidence_id
+    payload["evidence_assessments"].append(revised_payload)
+
+    with pytest.raises(ValidationError, match=message):
+        ResearchRecords.model_validate(payload)
+
+
+def test_evidence_supersession_rejects_cycles() -> None:
+    payload: dict[str, Any] = representative_records().model_dump(mode="json")
+    original = payload["evidence_assessments"][0]
+    original["supersedes_evidence_id"] = "evidence-002"
+    revised = original.copy()
+    revised["evidence_id"] = "evidence-002"
+    revised["supersedes_evidence_id"] = "evidence-001"
+    payload["evidence_assessments"].append(revised)
+
+    with pytest.raises(ValidationError, match="supersession cycle"):
+        ResearchRecords.model_validate(payload)
+
+
+def test_evidence_supersession_stays_within_creating_run() -> None:
+    payload: dict[str, Any] = representative_records().model_dump(mode="json")
+    second_run = payload["research_runs"][0].copy()
+    second_run["run_id"] = "other-run"
+    payload["research_runs"].append(second_run)
+    revised = payload["evidence_assessments"][0].copy()
+    revised["evidence_id"] = "evidence-002"
+    revised["supersedes_evidence_id"] = "evidence-001"
+    revised["record_provenance"] = revised["record_provenance"].copy()
+    revised["record_provenance"]["created_in_run_id"] = "other-run"
+    payload["evidence_assessments"].append(revised)
+
+    with pytest.raises(ValidationError, match="same research run"):
+        ResearchRecords.model_validate(payload)
 
 
 def test_record_provenance_uses_generic_creation_method() -> None:
@@ -477,22 +566,25 @@ def test_source_discovery_retains_multi_query_provenance() -> None:
     }
 
 
-def test_source_discovery_requires_search_provider_provenance() -> None:
+def test_discovery_provider_may_differ_from_metadata_provenance() -> None:
     payload: dict[str, Any] = representative_records().model_dump(mode="json")
     payload["sources"][0]["provider_provenance"] = [
         {"provider": "reference-library", "provider_record_id": "source-1"}
     ]
 
-    with pytest.raises(ValidationError, match="requires SourceProvenance for provider 'openalex'"):
-        ResearchRecords.model_validate(payload)
+    records = ResearchRecords.model_validate(payload)
+
+    assert records.source_discoveries[0].discovery_record_id == "W1"
+    assert records.sources[0].provider_provenance[0].provider == "reference-library"
 
 
-def test_source_discovery_provider_record_id_must_match_provider_provenance() -> None:
+def test_discovery_record_id_need_not_match_metadata_provenance() -> None:
     payload: dict[str, Any] = representative_records().model_dump(mode="json")
-    payload["source_discoveries"][0]["provider_record_id"] = "different-record"
+    payload["source_discoveries"][0]["discovery_record_id"] = "different-record"
 
-    with pytest.raises(ValidationError, match="provider_record_id must exactly match"):
-        ResearchRecords.model_validate(payload)
+    records = ResearchRecords.model_validate(payload)
+
+    assert records.source_discoveries[0].discovery_record_id == "different-record"
 
 
 @pytest.mark.parametrize(
@@ -611,6 +703,18 @@ def test_export_bundle_rejects_inconsistent_manifest() -> None:
         )
 
 
+@pytest.mark.parametrize(
+    ("field", "value"),
+    (("bundle_schema_version", "0.2"), ("records_schema_version", "0.4")),
+)
+def test_export_manifest_rejects_unsupported_schema_versions(field: str, value: str) -> None:
+    payload = representative_manifest(representative_records()).model_dump(mode="json")
+    payload[field] = value
+
+    with pytest.raises(ValidationError):
+        ExportBundleManifest.model_validate(payload)
+
+
 def test_export_bundle_rejects_run_protocol_mismatch() -> None:
     records = representative_records()
     changed_protocols = (
@@ -626,6 +730,22 @@ def test_export_bundle_rejects_run_protocol_mismatch() -> None:
     )
 
     with pytest.raises(ValidationError, match="protocol_references must match"):
+        representative_bundle(mismatched)
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    (
+        ("taxonomy_reference", "different-taxonomy.md"),
+        ("taxonomy_version", "different"),
+    ),
+)
+def test_export_bundle_rejects_run_taxonomy_mismatch(field: str, value: str) -> None:
+    records = representative_records()
+    mismatched_run = replace(records.research_runs[0], **{field: value})
+    mismatched = records.model_copy(update={"research_runs": (mismatched_run,)})
+
+    with pytest.raises(ValidationError, match=f"{field} must match bundled RunDefinition"):
         representative_bundle(mismatched)
 
 
@@ -689,6 +809,26 @@ def test_export_bundle_requires_approved_definition() -> None:
 
     with pytest.raises(ValidationError, match="requires an approved RunDefinition"):
         ExportBundle(manifest=bundle.manifest, run_definitions=snapshots, records=bundle.records)
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    (
+        ("stage", "undeclared-stage", "stage 'undeclared-stage' is not declared"),
+        ("reason_codes", ("undeclared-reason",), "reason_codes are not declared"),
+    ),
+)
+def test_export_bundle_validates_screening_decisions_against_plan(
+    field: str, value: str | tuple[str, ...], message: str
+) -> None:
+    records = representative_records()
+    index = 2 if field == "stage" else 0
+    decisions = list(records.screening_decisions)
+    decisions[index] = replace(decisions[index], **{field: value})
+    mismatched = records.model_copy(update={"screening_decisions": tuple(decisions)})
+
+    with pytest.raises(ValidationError, match=message):
+        representative_bundle(mismatched)
 
 
 def test_frozen_domain_records_have_no_mutable_containers() -> None:

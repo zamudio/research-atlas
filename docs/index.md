@@ -15,10 +15,15 @@ For installation and a compact project overview, start with the [repository READ
 
 ## Current contracts
 
-- Package version: 0.5.1
+- Package version: 0.5.2
 - Run-definition schema: 0.2
-- Records schema: 0.4
+- Records schema: 0.5
+- Export-bundle schema: 0.1
 - Supported literature providers: OpenAlex and Semantic Scholar
 - Reference-library adapter: Zotero, read-only
 - Crossref: future adapter; not integrated
 - Run 001: planned and unexecuted
+
+Package releases, run definitions, research records, and export bundles are independently
+versioned contracts. A future 1.0 release is intended to mark a clean first public-facing
+API/product contract; this release does not otherwise redesign versioning around that milestone.

@@ -1,7 +1,7 @@
 """Generic project and optional evidence-application profile schemas."""
 
 from pathlib import Path
-from typing import Self
+from typing import Literal, Self
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field
@@ -21,7 +21,7 @@ class ProjectProfile(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    schema_version: str
+    schema_version: Literal["0.2"]
     project_id: str = Field(min_length=1)
     display_name: str = Field(min_length=1)
     research_domain: str = Field(min_length=1)
@@ -44,7 +44,7 @@ class EvidenceApplicationProfile(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    schema_version: str
+    schema_version: Literal["0.1"]
     project_id: str = Field(min_length=1)
     application_name: str = Field(min_length=1)
     destinations: tuple[str, ...] = Field(min_length=1)

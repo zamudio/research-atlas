@@ -7,4 +7,5 @@ A project directory may contain a generic `project.yaml`, an optional consumer-s
 `application.yaml`, versioned vocabulary or taxonomies, and validated `RunDefinition` YAML under
 `runs/`. A planned definition is not an executed `ResearchRun`: it has no timestamps, search
 results, screening decisions, or extracted records. Exact queries may remain intentionally absent
-until their stable search specs are approved for execution.
+while the definition is planned. SearchSpec identities become stable when the definition is
+approved.

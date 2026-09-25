@@ -63,6 +63,8 @@ class SearchSpec(BaseModel):
                     "execution-ready search specs require non-blank provider_id, operation_id, "
                     "and exact_query"
                 )
+            if self.requested_limit is None:
+                raise ValueError("execution-ready search specs require a requested_limit")
             if any(
                 not parameter.name.strip() or not parameter.value.strip()
                 for parameter in self.parameters
@@ -128,8 +130,8 @@ class RunDefinition(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    schema_version: str = Field(min_length=1)
-    records_schema_version: str = Field(min_length=1)
+    schema_version: Literal["0.2"]
+    records_schema_version: Literal["0.5"]
     definition_status: Literal["planned", "approved", "retired"]
     project_id: str = Field(min_length=1)
     run_id: str = Field(min_length=1)

@@ -3,7 +3,7 @@
 from datetime import datetime
 from hashlib import sha256
 from pathlib import Path
-from typing import Self
+from typing import Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -67,7 +67,8 @@ class ExportBundleManifest(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    schema_version: str
+    bundle_schema_version: Literal["0.1"]
+    records_schema_version: Literal["0.5"]
     bundle_id: str
     generated_at: datetime
     project_id: str
@@ -77,7 +78,6 @@ class ExportBundleManifest(BaseModel):
     contributing_run_ids: tuple[str, ...]
     counts: ExportCounts
     construct_registry_version: str
-    research_questions: tuple[str, ...]
     content_files: tuple[ContentFile, ...] = ()
 
     @classmethod
@@ -93,13 +93,13 @@ class ExportBundleManifest(BaseModel):
         taxonomy_version: str,
         contributing_run_ids: tuple[str, ...],
         construct_registry_version: str,
-        research_questions: tuple[str, ...],
         content_files: tuple[ContentFile, ...] = (),
     ) -> Self:
-        """Build a manifest whose schema version and counts come from its records."""
+        """Build a manifest whose records version and counts come from its records."""
 
         return cls(
-            schema_version=records.schema_version,
+            bundle_schema_version="0.1",
+            records_schema_version=records.schema_version,
             bundle_id=bundle_id,
             generated_at=generated_at,
             project_id=project_id,
@@ -109,7 +109,6 @@ class ExportBundleManifest(BaseModel):
             contributing_run_ids=contributing_run_ids,
             counts=ExportCounts.from_records(records),
             construct_registry_version=construct_registry_version,
-            research_questions=research_questions,
             content_files=content_files,
         )
 
@@ -136,8 +135,8 @@ class ExportBundle(BaseModel):
     def validate_manifest_against_records(self) -> Self:
         """Ensure the manifest cannot disagree with the bundled record payload."""
 
-        if self.manifest.schema_version != self.records.schema_version:
-            raise ValueError("manifest schema_version must match records schema_version")
+        if self.manifest.records_schema_version != self.records.schema_version:
+            raise ValueError("manifest records_schema_version must match records schema_version")
         expected_counts = ExportCounts.from_records(self.records)
         if self.manifest.counts != expected_counts:
             raise ValueError(
@@ -190,6 +189,9 @@ class ExportBundle(BaseModel):
                 ),
                 ("definition_reference", run.definition_reference, snapshot.reference),
                 ("definition_fingerprint", run.definition_fingerprint, definition.fingerprint()),
+                ("protocol_references", run.protocol_references, definition.protocol_references),
+                ("taxonomy_reference", run.taxonomy_reference, definition.taxonomy.reference),
+                ("taxonomy_version", run.taxonomy_version, definition.taxonomy.version),
             ):
                 if run_value != definition_value:
                     run_metadata_errors.append(
@@ -247,10 +249,7 @@ class ExportBundle(BaseModel):
                         f"approved SearchSpec {execution.search_spec_id}; expected {spec_value!r}, "
                         f"got {execution_value!r}"
                     )
-            if (
-                spec.requested_limit is not None
-                and execution.requested_limit != spec.requested_limit
-            ):
+            if execution.requested_limit != spec.requested_limit:
                 execution_errors.append(
                     f"SearchExecution {execution.search_execution_id} requested_limit must match "
                     f"approved SearchSpec {execution.search_spec_id}; expected "
@@ -258,6 +257,29 @@ class ExportBundle(BaseModel):
                 )
         if execution_errors:
             raise ValueError("; ".join(execution_errors))
+
+        screening_errors: list[str] = []
+        for decision in self.records.screening_decisions:
+            snapshot = definitions_by_run_id.get(decision.run_id)
+            if snapshot is None:
+                screening_errors.append(
+                    f"ScreeningDecision {decision.decision_id} has no bundled RunDefinition"
+                )
+                continue
+            plan = snapshot.definition.screening_plan
+            if decision.stage not in plan.stages:
+                screening_errors.append(
+                    f"ScreeningDecision {decision.decision_id} stage {decision.stage!r} "
+                    "is not declared in the approved ScreeningPlan"
+                )
+            undeclared_reasons = sorted(set(decision.reason_codes) - set(plan.reason_codes))
+            if undeclared_reasons:
+                screening_errors.append(
+                    f"ScreeningDecision {decision.decision_id} reason_codes are not declared "
+                    f"in the approved ScreeningPlan: {undeclared_reasons}"
+                )
+        if screening_errors:
+            raise ValueError("; ".join(screening_errors))
         return self
 
 

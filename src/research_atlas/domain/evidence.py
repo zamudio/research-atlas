@@ -54,3 +54,19 @@ class EvidenceAssessment:
     contradictory_finding_ids: tuple[UUID, ...] = ()
     null_finding_ids: tuple[UUID, ...] = ()
     assessor: str | None = None
+    supersedes_evidence_id: str | None = None
+
+
+def current_evidence_assessments(
+    assessments: tuple[EvidenceAssessment, ...],
+) -> tuple[EvidenceAssessment, ...]:
+    """Return assessments not superseded by another append-only assessment."""
+
+    superseded = {
+        assessment.supersedes_evidence_id
+        for assessment in assessments
+        if assessment.supersedes_evidence_id is not None
+    }
+    return tuple(
+        assessment for assessment in assessments if assessment.evidence_id not in superseded
+    )

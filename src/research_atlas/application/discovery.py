@@ -10,6 +10,7 @@ from research_atlas.application.ports.literature_source import (
     LiteratureSourceError,
 )
 from research_atlas.application.source_identity import canonical_identity, merge_sources
+from research_atlas.domain.execution import SearchParameter
 from research_atlas.domain.studies import SourceRecord
 
 
@@ -35,8 +36,21 @@ class SerializedProviderOutcome(TypedDict):
     error_message: str | None
 
 
+class SerializedSearchParameter(TypedDict):
+    name: str
+    value: str
+
+
+class SerializedSearchSummary(TypedDict):
+    provider: str
+    operation: str
+    query: str
+    limit: int
+    parameters: list[SerializedSearchParameter]
+
+
 class SerializedDiscoveryReport(TypedDict):
-    searches: list[dict[str, str | int]]
+    searches: list[SerializedSearchSummary]
     provider_outcomes: list[SerializedProviderOutcome]
     normalized_source_count: int
     cross_provider_merge_count: int
@@ -64,6 +78,7 @@ class SearchSummary:
     operation: str
     query: str
     limit: int
+    parameters: tuple[SearchParameter, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -110,6 +125,7 @@ class DiscoverSources:
                 operation=search.source.operation_id,
                 query=search.query.query,
                 limit=search.query.limit,
+                parameters=search.query.parameters,
             )
             for search in self._searches
         )
@@ -205,6 +221,10 @@ def serialize_report(report: DiscoveryReport) -> SerializedDiscoveryReport:
                 "operation": search.operation,
                 "query": search.query,
                 "limit": search.limit,
+                "parameters": [
+                    {"name": parameter.name, "value": parameter.value}
+                    for parameter in search.parameters
+                ],
             }
             for search in report.searches
         ],

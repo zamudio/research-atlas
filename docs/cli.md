@@ -1,7 +1,8 @@
 # CLI
 
 The dry-run command discovers and normalizes source metadata. It does not create a `ResearchRun`,
-start Run 001, extract evidence, or invoke an LLM. `--limit` applies per requested operation.
+start Run 001, extract evidence, or invoke an LLM. `--limit` applies per requested operation. Its
+JSON search summaries preserve each logical query's generic parameter name/value pairs.
 
 ```shell
 uv run research-atlas-dry-run "urban heat mitigation systematic review" --limit 8

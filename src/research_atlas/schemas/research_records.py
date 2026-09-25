@@ -32,11 +32,11 @@ def _missing_values(values: Iterable[Hashable], valid_values: Iterable[Hashable]
 
 
 class ResearchRecords(BaseModel):
-    """A v0.4 collection of normalized evidence and research-process records."""
+    """A v0.5 collection of normalized evidence and research-process records."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    schema_version: Literal["0.4"] = "0.4"
+    schema_version: Literal["0.5"] = "0.5"
     sources: tuple[SourceRecord, ...] = ()
     studies: tuple[StudyRecord, ...] = ()
     constructs: tuple[ConstructRecord, ...] = ()
@@ -90,7 +90,8 @@ class ResearchRecords(BaseModel):
         measurement_ids = {record.measurement_id for record in self.measurements}
         intervention_ids = {record.intervention_id for record in self.interventions}
         finding_ids = {record.finding_id for record in self.findings}
-        evidence_ids = {record.evidence_id for record in self.evidence_assessments}
+        evidence_by_id = {record.evidence_id: record for record in self.evidence_assessments}
+        evidence_ids = set(evidence_by_id)
         candidate_ids = {record.candidate_id for record in self.application_candidates}
         run_ids = {record.run_id for record in self.research_runs}
         executions_by_id = {record.search_execution_id: record for record in self.search_executions}
@@ -157,6 +158,44 @@ class ResearchRecords(BaseModel):
                 ("null_finding_ids", record.null_finding_ids),
             ):
                 check(f"EvidenceAssessment {record.evidence_id} {field_name}", values, finding_ids)
+        superseded_evidence_ids: list[str] = []
+        for record in self.evidence_assessments:
+            if record.supersedes_evidence_id is None:
+                continue
+            superseded_evidence_ids.append(record.supersedes_evidence_id)
+            check(
+                f"EvidenceAssessment {record.evidence_id} supersedes_evidence_id",
+                (record.supersedes_evidence_id,),
+                evidence_ids,
+            )
+            previous = evidence_by_id.get(record.supersedes_evidence_id)
+            if previous is record:
+                errors.append(f"EvidenceAssessment {record.evidence_id} cannot supersede itself")
+            elif (
+                previous is not None
+                and previous.record_provenance.created_in_run_id
+                != record.record_provenance.created_in_run_id
+            ):
+                errors.append(
+                    f"EvidenceAssessment {record.evidence_id} may only supersede an assessment "
+                    "created in the same research run"
+                )
+        duplicate_superseded_evidence = _duplicate_values(superseded_evidence_ids)
+        if duplicate_superseded_evidence:
+            errors.append(
+                "evidence assessments cannot be superseded more than once: "
+                f"{sorted(map(str, duplicate_superseded_evidence))}"
+            )
+        for assessment in self.evidence_assessments:
+            visited = {assessment.evidence_id}
+            parent_id = assessment.supersedes_evidence_id
+            while parent_id is not None:
+                if parent_id in visited:
+                    errors.append(f"EvidenceAssessment supersession cycle includes {parent_id}")
+                    break
+                visited.add(parent_id)
+                parent = evidence_by_id.get(parent_id)
+                parent_id = parent.supersedes_evidence_id if parent is not None else None
         for record in self.application_candidates:
             check(
                 f"ApplicationCandidate {record.candidate_id} linked_construct_ids",
@@ -202,27 +241,6 @@ class ResearchRecords(BaseModel):
                 errors.append(
                     f"SourceDiscovery {record.discovery_id} requires a succeeded SearchExecution"
                 )
-            source = sources_by_id.get(record.source_id)
-            if execution is not None and source is not None:
-                matching_provider = tuple(
-                    provenance
-                    for provenance in source.provider_provenance
-                    if provenance.provider == execution.provider_id
-                )
-                if not matching_provider:
-                    errors.append(
-                        f"SourceDiscovery {record.discovery_id} source requires "
-                        f"SourceProvenance for provider {execution.provider_id!r}"
-                    )
-                elif record.provider_record_id is not None and not any(
-                    provenance.provider_record_id == record.provider_record_id
-                    for provenance in matching_provider
-                ):
-                    errors.append(
-                        f"SourceDiscovery {record.discovery_id} provider_record_id must exactly "
-                        "match SourceProvenance for its SearchExecution provider"
-                    )
-
         superseded_ids: list[str] = []
         for record in self.screening_decisions:
             check(f"ScreeningDecision {record.decision_id} run_id", (record.run_id,), run_ids)

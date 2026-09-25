@@ -15,6 +15,7 @@ from research_atlas.application.ports.literature_source import (
     LiteratureQuery,
     LiteratureSearchRequest,
 )
+from research_atlas.domain.execution import SearchParameter
 from research_atlas.domain.studies import SourceRecord
 from research_atlas.infrastructure.providers import semantic_scholar
 from research_atlas.infrastructure.providers._http import RequestAttemptEvent
@@ -67,6 +68,7 @@ def test_semantic_scholar_maps_mocked_paper() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.url.path == "/graph/v1/paper/search"
         assert request.headers["x-api-key"] == "secret"
+        assert request.url.params["publicationTypes"] == "Review"
         return httpx.Response(
             200,
             json={
@@ -94,7 +96,13 @@ def test_semantic_scholar_maps_mocked_paper() -> None:
         async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
             return await SemanticScholarRelevanceSearch(
                 "secret", client, request_coordinator=isolated_coordinator(clock)
-            ).search(LiteratureQuery("example topic", limit=5))
+            ).search(
+                LiteratureQuery(
+                    "example topic",
+                    limit=5,
+                    parameters=(SearchParameter("publicationTypes", "Review"),),
+                )
+            )
 
     records = asyncio.run(run_search())
 

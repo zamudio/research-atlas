@@ -15,10 +15,12 @@ def test_planned_run_definition_yaml_validates_without_exact_queries() -> None:
     definition = RunDefinition.from_yaml(RUN_DEFINITION_PATH)
 
     assert definition.schema_version == "0.2"
+    assert definition.records_schema_version == "0.5"
     assert definition.definition_status == "planned"
     assert definition.run_id == "learning-foundations-001"
     assert all(not spec.execution_ready for spec in definition.search_plan.search_specs)
     assert all(spec.exact_query is None for spec in definition.search_plan.search_specs)
+    assert all(spec.requested_limit is None for spec in definition.search_plan.search_specs)
     assert not hasattr(definition, "execution_started")
 
 
@@ -42,6 +44,7 @@ def test_exact_query_text_is_preserved_byte_for_character() -> None:
             "provider_id": "openalex",
             "operation_id": "openalex.search",
             "exact_query": query,
+            "requested_limit": 20,
         }
     )
 
@@ -68,11 +71,41 @@ def test_execution_ready_search_spec_rejects_blank_required_values(field: str, v
             "provider_id": "openalex",
             "operation_id": "openalex.search",
             "exact_query": "query",
+            "requested_limit": 20,
             field: value,
         }
     )
 
     with pytest.raises(ValidationError, match="non-blank provider_id"):
+        RunDefinition.model_validate(payload)
+
+
+def test_execution_ready_search_spec_requires_requested_limit() -> None:
+    definition = RunDefinition.from_yaml(RUN_DEFINITION_PATH)
+    payload = definition.model_dump(mode="json")
+    payload["search_plan"]["search_specs"][0].update(
+        {
+            "execution_ready": True,
+            "provider_id": "openalex",
+            "operation_id": "openalex.search",
+            "exact_query": "query",
+        }
+    )
+
+    with pytest.raises(ValidationError, match="require a requested_limit"):
+        RunDefinition.model_validate(payload)
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    (("schema_version", "0.3"), ("records_schema_version", "0.6")),
+)
+def test_run_definition_rejects_unsupported_schema_versions(field: str, value: str) -> None:
+    definition = RunDefinition.from_yaml(RUN_DEFINITION_PATH)
+    payload = definition.model_dump(mode="json")
+    payload[field] = value
+
+    with pytest.raises(ValidationError):
         RunDefinition.model_validate(payload)
 
 

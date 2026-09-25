@@ -27,14 +27,16 @@ therefore validates the relationship between them.
 
 ## Definition and execution integrity
 
-A run definition contains stable question and search-spec IDs, scope, screening and stopping
-plans, protocol and taxonomy references, evidence strategy, outputs, and limitations. Canonical
-JSON over the complete validated model produces a deterministic SHA-256 fingerprint.
+A run definition contains question and search-spec IDs, scope, screening and stopping plans,
+protocol and taxonomy references, evidence strategy, outputs, and limitations. Planned
+definitions may change those identities as exact searches are designed; they become stable when a
+definition is approved. Canonical JSON over the complete validated model produces a deterministic
+SHA-256 fingerprint.
 
 A `ResearchRun` stores the definition reference, schema version, and fingerprint it executed.
 Every contributing run in an export has exactly one `RunDefinitionSnapshot`. Bundle validation
 requires an approved definition and exact agreement on run ID, project, reference, schema version,
-and fingerprint.
+fingerprint, protocol references, and taxonomy reference/version.
 
 Each `SearchExecution` is one logical execution. The bundle verifies that its `search_spec_id`
 exists in the corresponding definition and that provider, operation, exact query, generic
@@ -64,19 +66,21 @@ or application records.
 
 ## Referential integrity and portability
 
-`ResearchRecords` schema 0.4 rejects duplicate IDs, dangling references, inconsistent discovery
-and screening chains, and invalid append-only supersession. A `SourceDiscovery` must agree with its
-`SearchExecution` run and provider, while the linked source must carry matching
-`SourceProvenance`. This preserves the distinction between metadata origin and the research search
-that discovered a source.
+`ResearchRecords` schema 0.5 rejects duplicate IDs, dangling references, inconsistent discovery
+and screening chains, and invalid append-only screening/evidence supersession. A
+`SourceDiscovery` must agree with its successful `SearchExecution` and run. It records the
+discovery mechanism and may legitimately differ from `SourceProvenance`, which records the origin
+of normalized bibliographic metadata.
 
 `ProtocolReference(protocol_id, version, phase)` keeps protocols independently evolvable.
 `RecordProvenance.creation_method` applies across import, extraction, synthesis, screening, review,
-and application. Static bundles are immutable portable snapshots; direct package use, local
-persistence behind `ResearchWorkStore`, and a future API remain compatible delivery modes.
+and application. Bundle schema 0.1 independently describes the portable manifest + run-definition
+snapshots + records shape, while the manifest identifies the records schema separately. Static
+bundles are immutable portable snapshots; direct package use, local persistence behind
+`ResearchWorkStore`, and a future API remain compatible delivery modes.
 
 ## Deliberate limits
 
-Version 0.5.1 adds no Crossref adapter, billing, authentication, tenancy, distributed jobs,
+Version 0.5.2 adds no Crossref adapter, billing, authentication, tenancy, distributed jobs,
 PostgreSQL, fuzzy matching, universal evidence ontology, or agent-framework coupling. Run 001 is
 planned and unexecuted.

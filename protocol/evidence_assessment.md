@@ -38,5 +38,9 @@ Each assessment lists supporting, contradictory, and null findings, each of whic
 study and source link. The assessment's human-readable claim states exactly what those findings are
 being used to assess; optional construct links provide indexing and context rather than ownership.
 Uncertainty, limitations, and generalizability are first-class fields. A later assessment may
-supersede an earlier one, but the earlier version and its source links remain reproducible.
-Later evidence application may reference an assessment, but must not mutate or rewrite it.
+link to an earlier one through `supersedes_evidence_id`; the earlier version and its source links
+remain reproducible. Supersession links must exist, cannot point to self, cannot form cycles or
+branches, and remain within the same creating research run. Whether two assessments address the
+same logical claim or body of evidence remains an explicit review responsibility rather than a
+text-equality rule. Later evidence application may reference an assessment, but must not mutate or
+rewrite it.

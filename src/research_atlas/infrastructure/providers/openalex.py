@@ -53,13 +53,18 @@ class OpenAlexLiteratureSource:
             "cursor": "*",
             "select": self._select,
         }
+        if reserved := {parameter.name for parameter in query.parameters} & params.keys():
+            raise ValueError(f"OpenAlex adapter manages reserved parameters: {sorted(reserved)}")
         headers = {"Authorization": f"Bearer {self._api_key}"} if self._api_key else None
         records: list[SourceRecord] = []
         while len(records) < query.limit:
+            request_params = httpx.QueryParams(params)
+            for parameter in query.parameters:
+                request_params = request_params.add(parameter.name, parameter.value)
             response = await get_with_retries(
                 client,
                 f"{self.base_url}/works",
-                params=params,
+                params=request_params,
                 headers=headers,
             )
             payload = cast(Mapping[str, object], response.json())

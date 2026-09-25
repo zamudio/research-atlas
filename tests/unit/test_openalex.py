@@ -13,6 +13,7 @@ from research_atlas.application.ports.literature_source import (
     LiteratureQuery,
     LiteratureSearchRequest,
 )
+from research_atlas.domain.execution import SearchParameter
 from research_atlas.infrastructure.providers.openalex import OpenAlexLiteratureSource
 
 
@@ -25,6 +26,7 @@ def test_openalex_maps_mocked_work_and_retries_rate_limit() -> None:
         assert request.url.path == "/works"
         assert request.url.params["search"] == "example topic"
         assert request.url.params["per_page"] == "5"
+        assert request.url.params["filter"] == "type:review"
         assert "authorization" not in request.headers
         if calls == 1:
             return httpx.Response(429, headers={"Retry-After": "0"})
@@ -63,7 +65,11 @@ def test_openalex_maps_mocked_work_and_retries_rate_limit() -> None:
             transport=httpx.MockTransport(handler), base_url="https://api.openalex.org"
         ) as client:
             return await OpenAlexLiteratureSource(client=client).search(
-                LiteratureQuery("example topic", limit=5)
+                LiteratureQuery(
+                    "example topic",
+                    limit=5,
+                    parameters=(SearchParameter("filter", "type:review"),),
+                )
             )
 
     records = asyncio.run(run_search())
