@@ -16,6 +16,7 @@ For installation and a compact project overview, start with the [repository READ
 ## Current contracts
 
 - Package version: 0.5.1
+- Run-definition schema: 0.2
 - Records schema: 0.4
 - Supported literature providers: OpenAlex and Semantic Scholar
 - Reference-library adapter: Zotero, read-only

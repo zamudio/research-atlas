@@ -14,6 +14,7 @@ RUN_DEFINITION_PATH = (
 def test_planned_run_definition_yaml_validates_without_exact_queries() -> None:
     definition = RunDefinition.from_yaml(RUN_DEFINITION_PATH)
 
+    assert definition.schema_version == "0.2"
     assert definition.definition_status == "planned"
     assert definition.run_id == "learning-foundations-001"
     assert all(not spec.execution_ready for spec in definition.search_plan.search_specs)
