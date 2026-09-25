@@ -20,7 +20,10 @@ from research_atlas.application.ports.literature_source import (
 from research_atlas.infrastructure.config import ProviderSettings
 from research_atlas.infrastructure.providers._http import AttemptObserver, RequestAttemptEvent
 from research_atlas.infrastructure.providers.crossref import CrossrefWorksSearch
-from research_atlas.infrastructure.providers.openalex import OpenAlexLiteratureSource
+from research_atlas.infrastructure.providers.openalex import (
+    OpenAlexLiteratureSource,
+    OpenAlexSemanticSearch,
+)
 from research_atlas.infrastructure.providers.semantic_scholar import (
     SemanticScholarBulkSearch,
     SemanticScholarRelevanceSearch,
@@ -35,6 +38,11 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Discover and normalize a few sources for review")
     parser.add_argument("query", help="OpenAlex search query")
     parser.add_argument("--limit", type=int, default=8, choices=range(1, 11))
+    parser.add_argument(
+        "--openalex-semantic",
+        metavar="QUERY",
+        help="also run OpenAlex semantic discovery with this exact natural-language query",
+    )
     parser.add_argument(
         "--crossref-bibliographic",
         metavar="QUERY",
@@ -99,6 +107,7 @@ async def run_dry_run(
     *,
     limit: int,
     settings: ProviderSettings,
+    openalex_semantic_query: str | None = None,
     crossref_bibliographic_query: str | None = None,
     semantic_scholar_relevance_query: str | None = None,
     semantic_scholar_bulk_query: str | None = None,
@@ -116,6 +125,13 @@ async def run_dry_run(
             LiteratureQuery(query_text, limit=limit),
         )
     ]
+    if openalex_semantic_query is not None:
+        searches.append(
+            LiteratureSearchRequest(
+                OpenAlexSemanticSearch(settings.openalex_api_key),
+                LiteratureQuery(openalex_semantic_query, limit=limit),
+            )
+        )
     if semantic_scholar_relevance_query is not None:
         searches.append(
             LiteratureSearchRequest(
@@ -160,6 +176,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             run_dry_run(
                 args.query,
                 limit=args.limit,
+                openalex_semantic_query=args.openalex_semantic,
                 crossref_bibliographic_query=args.crossref_bibliographic,
                 semantic_scholar_relevance_query=args.semantic_scholar_relevance,
                 semantic_scholar_bulk_query=semantic_scholar_bulk_query,

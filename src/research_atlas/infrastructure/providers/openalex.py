@@ -2,7 +2,7 @@
 
 from collections.abc import Mapping
 from datetime import UTC, datetime
-from typing import cast
+from typing import ClassVar, cast
 
 import httpx
 
@@ -141,4 +141,62 @@ class OpenAlexLiteratureSource:
             provenance=(SourceProvenance("openalex", work_id, datetime.now(UTC)),),
             identifiers=identifiers,
             source_url=landing_url if isinstance(landing_url, str) else None,
+        )
+
+
+class OpenAlexSemanticSearch(OpenAlexLiteratureSource):
+    """OpenAlex semantic discovery using one provider-ranked result set."""
+
+    operation_id = "openalex.semantic"
+    _maximum_results = 50
+    _reserved_parameters: ClassVar[frozenset[str]] = frozenset(
+        {
+            "cursor",
+            "per_page",
+            "search",
+            "search.exact",
+            "search.semantic",
+            "select",
+        }
+    )
+
+    async def search(self, query: LiteratureQuery) -> tuple[SourceRecord, ...]:
+        if query.limit > self._maximum_results:
+            raise ValueError(
+                f"OpenAlex semantic search supports at most {self._maximum_results} results"
+            )
+        return await super().search(query)
+
+    async def _search(
+        self, client: httpx.AsyncClient, query: LiteratureQuery
+    ) -> tuple[SourceRecord, ...]:
+        reserved = {parameter.name for parameter in query.parameters} & self._reserved_parameters
+        if reserved:
+            raise ValueError(
+                f"OpenAlex semantic adapter manages reserved parameters: {sorted(reserved)}"
+            )
+        request_params = httpx.QueryParams(
+            {
+                "search.semantic": query.query,
+                "per_page": query.limit,
+                "select": self._select,
+            }
+        )
+        for parameter in query.parameters:
+            request_params = request_params.add(parameter.name, parameter.value)
+        headers = {"Authorization": f"Bearer {self._api_key}"} if self._api_key else None
+        response = await get_with_retries(
+            client,
+            f"{self.base_url}/works",
+            params=request_params,
+            headers=headers,
+        )
+        payload = cast(Mapping[str, object], response.json())
+        results = payload.get("results", [])
+        if not isinstance(results, list):
+            raise ValueError("OpenAlex response results must be a list")
+        return tuple(
+            self._map_work(cast(Mapping[str, object], raw))
+            for raw in cast(list[object], results)[: query.limit]
+            if isinstance(raw, Mapping)
         )

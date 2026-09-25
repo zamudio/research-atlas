@@ -3,9 +3,25 @@
 ## Roles
 
 OpenAlex and Semantic Scholar implement the provider-neutral `LiteratureSource` port and return
-normalized `SourceRecord` values. Semantic Scholar relevance search and bulk search are separate
-operations with different endpoint semantics; Research Atlas never guesses which one a query
-intends. Zotero implements a separate read-only reference-library port.
+normalized `SourceRecord` values. `openalex.search` is ordinary lexical/full-text discovery;
+`openalex.semantic` is natural-language semantic discovery and is the preferred product-safe
+semantic candidate currently being evaluated for Research Atlas. Semantic Scholar relevance
+search remains an optional/internal comparator, and its relevance and bulk searches remain
+separate operations with different endpoint semantics. No Research Atlas core contract depends on
+Semantic Scholar. Zotero implements a separate read-only reference-library port.
+
+## OpenAlex discovery operations
+
+Both OpenAlex operations use `/works` and the same `SourceRecord` normalization. Lexical discovery
+maps the exact query to `search`; semantic discovery maps it to `search.semantic` without rewriting
+it into Boolean, ordinary-search, or exact-search syntax. Semantic search is one provider-ranked
+result set with a maximum of 50 results and a provider limit of one semantic request per second;
+requests above 50 fail before network access rather than reporting a silently truncated result.
+Adapter-owned search-mode, result-limit, selection, and cursor parameters cannot be overridden.
+
+Under ordinary OpenAlex `search`, `?` and `*` are wildcard syntax and may be rejected unless exact
+search semantics are used. The lexical adapter does not silently strip or rewrite approved query
+text to avoid that provider behavior.
 
 Crossref implements the same port as an **experimental feasibility adapter**, `CrossrefWorksSearch`
 (`crossref.works`). It is for bibliographic discovery and metadata verification, not a replacement
@@ -59,7 +75,8 @@ reports retain them for review rather than silently dropping approved logical in
 ## Request safety
 
 OpenAlex sends its optional key only in the authorization header and retains provider-appropriate
-retry behavior. Semantic Scholar requests share a 1.1-second in-process coordinator, including
+retry behavior. OpenAlex semantic discovery is currently limited by the provider to one request
+per second. Semantic Scholar requests share a 1.1-second in-process coordinator, including
 pagination and retries, plus same-machine single ownership for S2-enabled dry runs.
 
 Semantic Scholar honors `Retry-After`. A 429 without it waits 5 seconds before the second attempt

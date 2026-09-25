@@ -7,16 +7,30 @@ JSON search summaries preserve each logical query's generic parameter name/value
 
 ```shell
 uv run research-atlas-dry-run "urban heat mitigation systematic review" --limit 8
+uv run research-atlas-dry-run "urban heat mitigation" --limit 8 \
+  --openalex-semantic "How does urban heat mitigation affect public health?"
 uv run research-atlas-dry-run "supply chain resilience" --limit 5 \
   --semantic-scholar-relevance "supply chain resilience systematic review"
 uv run research-atlas-dry-run "museum conservation" --limit 5 \
   --semantic-scholar-bulk '"museum conservation" + (review | preservation)'
 ```
 
-The positional query is for OpenAlex. `--semantic-scholar-relevance` selects Semantic Scholar's
-plain-text relevance operation; `--semantic-scholar-bulk` selects its Boolean/filter-oriented bulk
-operation. Every provider receives the exact query supplied for that operation. Syntax is not
-treated as portable between providers.
+The positional query selects OpenAlex lexical/full-text discovery (`openalex.search`).
+`--openalex-semantic QUERY` adds OpenAlex semantic discovery (`openalex.semantic`) to the same dry
+run, preserving the semantic text exactly. Semantic discovery has a 50-result maximum and OpenAlex
+limits it to one request per second. It is the preferred product-safe semantic-discovery candidate
+currently being evaluated; Semantic Scholar relevance remains an optional/internal comparator.
+`--semantic-scholar-relevance` selects that comparator's plain-text relevance operation, while
+`--semantic-scholar-bulk` selects its Boolean/filter-oriented bulk operation. Every provider
+receives the exact query supplied for that operation. Syntax is not treated as portable between
+providers.
+
+In ordinary OpenAlex lexical `search`, `?` and `*` are wildcard syntax and may be rejected unless
+exact-search semantics are used. Research Atlas does not silently strip or rewrite the query to
+work around this provider behavior.
+
+These options remain metadata-only: they do not create `ResearchRun`, `SearchExecution`, or
+`SourceDiscovery` records, and they do not authorize Run 001 execution.
 
 ## Experimental Crossref comparison
 

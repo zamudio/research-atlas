@@ -14,7 +14,11 @@ from research_atlas.application.ports.literature_source import (
     LiteratureSearchRequest,
 )
 from research_atlas.domain.execution import SearchParameter
-from research_atlas.infrastructure.providers.openalex import OpenAlexLiteratureSource
+from research_atlas.domain.studies import SourceRecord
+from research_atlas.infrastructure.providers.openalex import (
+    OpenAlexLiteratureSource,
+    OpenAlexSemanticSearch,
+)
 
 
 def test_openalex_maps_mocked_work_and_retries_rate_limit() -> None:
@@ -132,3 +136,115 @@ def test_openalex_provider_error_is_sanitized() -> None:
             )
 
     asyncio.run(run_discovery())
+
+
+def test_openalex_semantic_uses_exact_mode_forwards_parameters_and_preserves_order() -> None:
+    exact_query = " How do feedback loops affect student learning? "
+    work_ids = ("W3", "W1", "W2")
+    calls = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        assert request.url.path == "/works"
+        assert request.url.params["search.semantic"] == exact_query
+        assert "search" not in request.url.params
+        assert "search.exact" not in request.url.params
+        assert "cursor" not in request.url.params
+        assert request.url.params["per_page"] == "50"
+        assert request.url.params["filter"] == "type:article"
+        return httpx.Response(
+            200,
+            json={
+                "results": [
+                    {
+                        "id": f"https://openalex.org/{work_id}",
+                        "doi": f"https://doi.org/10.1000/{work_id}",
+                        "title": f"Result {work_id}",
+                        "authorships": [{"author": {"display_name": "Ada Author"}}],
+                        "publication_year": 2024,
+                        "type": "article",
+                        "primary_location": {"landing_page_url": f"https://example.test/{work_id}"},
+                        "ids": {"pmid": f"https://pubmed.ncbi.nlm.nih.gov/{work_id[1:]}"},
+                    }
+                    for work_id in work_ids
+                ]
+            },
+        )
+
+    async def run_search() -> tuple[SourceRecord, ...]:
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            source = OpenAlexSemanticSearch(client=client)
+            assert source.provider_id == "openalex"
+            assert source.operation_id == "openalex.semantic"
+            return await source.search(
+                LiteratureQuery(
+                    exact_query,
+                    limit=50,
+                    parameters=(SearchParameter("filter", "type:article"),),
+                )
+            )
+
+    records = asyncio.run(run_search())
+
+    assert calls == 1
+    assert [record.title for record in records] == [f"Result {work_id}" for work_id in work_ids]
+    assert [record.provider_provenance[0].provider_record_id for record in records] == list(
+        work_ids
+    )
+    assert records[0].authors == ("Ada Author",)
+    assert records[0].year == 2024
+    assert records[0].source_type == "article"
+    assert records[0].source_url == "https://example.test/W3"
+    assert {(item.namespace, item.value) for item in records[0].external_identifiers} == {
+        ("doi", "10.1000/w3"),
+        ("openalex", "W3"),
+        ("pmid", "3"),
+    }
+
+
+def test_openalex_semantic_rejects_limit_above_50_before_network_access() -> None:
+    calls = 0
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        raise AssertionError("limit validation must happen before network access")
+
+    async def run_search() -> None:
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            with pytest.raises(ValueError, match="at most 50 results"):
+                await OpenAlexSemanticSearch(client=client).search(
+                    LiteratureQuery("semantic question", limit=51)
+                )
+
+    asyncio.run(run_search())
+
+    assert calls == 0
+
+
+@pytest.mark.parametrize(
+    "name",
+    ("cursor", "per_page", "search", "search.exact", "search.semantic", "select"),
+)
+def test_openalex_semantic_rejects_adapter_owned_parameters(name: str) -> None:
+    calls = 0
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        raise AssertionError("reserved-parameter validation must happen before network access")
+
+    async def run_search() -> None:
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            with pytest.raises(ValueError, match="manages reserved parameters"):
+                await OpenAlexSemanticSearch(client=client).search(
+                    LiteratureQuery(
+                        "semantic question",
+                        parameters=(SearchParameter(name, "override"),),
+                    )
+                )
+
+    asyncio.run(run_search())
+
+    assert calls == 0

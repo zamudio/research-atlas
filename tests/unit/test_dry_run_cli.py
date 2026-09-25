@@ -27,6 +27,11 @@ class FakeOpenAlexSource(FakeSource):
     operation_id = "openalex.search"
 
 
+class FakeOpenAlexSemanticSource(FakeSource):
+    provider_id = "openalex"
+    operation_id = "openalex.semantic"
+
+
 class FakeRelevanceSource(FakeSource):
     provider_id = "semantic_scholar"
     operation_id = "semantic_scholar.relevance"
@@ -65,6 +70,7 @@ def fake_sources(monkeypatch: pytest.MonkeyPatch) -> None:
     from research_atlas.cli import dry_run
 
     monkeypatch.setattr(dry_run, "OpenAlexLiteratureSource", FakeOpenAlexSource)
+    monkeypatch.setattr(dry_run, "OpenAlexSemanticSearch", FakeOpenAlexSemanticSource)
     monkeypatch.setattr(dry_run, "SemanticScholarRelevanceSearch", FakeRelevanceSource)
     monkeypatch.setattr(dry_run, "SemanticScholarBulkSearch", FakeBulkSource)
     monkeypatch.setattr(dry_run, "CrossrefWorksSearch", FakeCrossrefSource)
@@ -160,6 +166,57 @@ def test_openalex_only_dry_run_does_not_acquire_s2_guard(fake_sources: None) -> 
     )
 
     assert acquisitions == 0
+
+
+def test_lexical_and_semantic_openalex_are_distinct_metadata_only_cli_operations(
+    fake_sources: None,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from research_atlas.cli import dry_run
+
+    exact_semantic_query = " How does tutoring feedback improve learning? "
+
+    assert (
+        dry_run.main(
+            [
+                "tutoring feedback",
+                "--openalex-semantic",
+                exact_semantic_query,
+                "--limit",
+                "2",
+            ]
+        )
+        == 0
+    )
+
+    report = json.loads(capsys.readouterr().out)
+    assert report["searches"] == [
+        {
+            "provider": "openalex",
+            "operation": "openalex.search",
+            "query": "tutoring feedback",
+            "limit": 2,
+            "parameters": [],
+        },
+        {
+            "provider": "openalex",
+            "operation": "openalex.semantic",
+            "query": exact_semantic_query,
+            "limit": 2,
+            "parameters": [],
+        },
+    ]
+    assert [outcome["operation"] for outcome in report["provider_outcomes"]] == [
+        "openalex.search",
+        "openalex.semantic",
+    ]
+    assert set(report) == {
+        "searches",
+        "provider_outcomes",
+        "sources",
+        "normalized_source_count",
+        "cross_provider_merge_count",
+    }
 
 
 def test_s2_dry_run_acquires_and_releases_guard(fake_sources: None) -> None:
