@@ -1,4 +1,5 @@
 import asyncio
+import json
 from contextlib import AbstractContextManager
 from pathlib import Path
 from types import TracebackType
@@ -36,6 +37,11 @@ class FakeBulkSource(FakeSource):
     operation_id = "semantic_scholar.bulk"
 
 
+class FakeCrossrefSource(FakeSource):
+    provider_id = "crossref"
+    operation_id = "crossref.works"
+
+
 class RecordingGuard(AbstractContextManager[object]):
     def __init__(self, events: list[str]) -> None:
         self._events = events
@@ -61,6 +67,77 @@ def fake_sources(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(dry_run, "OpenAlexLiteratureSource", FakeOpenAlexSource)
     monkeypatch.setattr(dry_run, "SemanticScholarRelevanceSearch", FakeRelevanceSource)
     monkeypatch.setattr(dry_run, "SemanticScholarBulkSearch", FakeBulkSource)
+    monkeypatch.setattr(dry_run, "CrossrefWorksSearch", FakeCrossrefSource)
+
+
+def test_crossref_dry_run_avoids_s2_guard_and_preserves_request(
+    fake_sources: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from research_atlas.cli import dry_run
+
+    class RecordingCrossref(FakeCrossrefSource):
+        def __init__(self, mailto: str | None = None) -> None:
+            assert mailto == "researcher@example.test"
+
+        async def search(self, query: LiteratureQuery) -> tuple[SourceRecord, ...]:
+            assert query == LiteratureQuery(" exact Crossref query ", limit=3)
+            return ()
+
+    def forbidden_guard() -> AbstractContextManager[object]:
+        raise AssertionError("OpenAlex plus Crossref must not acquire S2 ownership")
+
+    monkeypatch.setattr(dry_run, "CrossrefWorksSearch", RecordingCrossref)
+    output = asyncio.run(
+        dry_run.run_dry_run(
+            "openalex query",
+            limit=3,
+            settings=ProviderSettings(crossref_mailto="researcher@example.test"),
+            crossref_bibliographic_query=" exact Crossref query ",
+            ownership_guard_factory=forbidden_guard,
+        )
+    )
+    report = json.loads(output)
+    assert [item["provider"] for item in report["searches"]] == ["openalex", "crossref"]
+    assert report["searches"][1] == {
+        "provider": "crossref",
+        "operation": "crossref.works",
+        "query": " exact Crossref query ",
+        "limit": 3,
+        "parameters": [],
+    }
+    assert all(item["success"] for item in report["provider_outcomes"])
+    assert set(report) == {
+        "searches",
+        "provider_outcomes",
+        "sources",
+        "normalized_source_count",
+        "cross_provider_merge_count",
+    }
+
+
+def test_crossref_flag_adds_operation_to_cli_report(
+    fake_sources: None,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from research_atlas.cli import dry_run
+
+    assert (
+        dry_run.main(
+            [
+                "openalex",
+                "--crossref-bibliographic",
+                "exact bibliography",
+                "--limit",
+                "2",
+            ]
+        )
+        == 0
+    )
+    report = json.loads(capsys.readouterr().out)
+    assert report["searches"][1]["operation"] == "crossref.works"
+    assert report["searches"][1]["query"] == "exact bibliography"
+    assert report["searches"][1]["limit"] == 2
 
 
 def test_openalex_only_dry_run_does_not_acquire_s2_guard(fake_sources: None) -> None:

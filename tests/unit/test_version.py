@@ -13,7 +13,7 @@ def test_package_version_matches_project_metadata() -> None:
     with pyproject_path.open("rb") as pyproject_file:
         project_version = load(pyproject_file)["project"]["version"]
 
-    assert __version__ == project_version == "0.5.2"
+    assert __version__ == project_version == "0.6.0"
 
 
 def test_python_version_configuration_is_consistent() -> None:

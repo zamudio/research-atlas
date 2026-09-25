@@ -2,7 +2,8 @@
 
 The dry-run command discovers and normalizes source metadata. It does not create a `ResearchRun`,
 start Run 001, extract evidence, or invoke an LLM. `--limit` applies per requested operation. Its
-JSON search summaries preserve each logical query's generic parameter name/value pairs.
+JSON search summaries preserve each logical query's generic parameter name/value pairs. No
+`SearchExecution` or `SourceDiscovery` records are created.
 
 ```shell
 uv run research-atlas-dry-run "urban heat mitigation systematic review" --limit 8
@@ -16,6 +17,21 @@ The positional query is for OpenAlex. `--semantic-scholar-relevance` selects Sem
 plain-text relevance operation; `--semantic-scholar-bulk` selects its Boolean/filter-oriented bulk
 operation. Every provider receives the exact query supplied for that operation. Syntax is not
 treated as portable between providers.
+
+## Experimental Crossref comparison
+
+```shell
+uv run research-atlas-dry-run "urban heat mitigation" --limit 5 \
+  --crossref-bibliographic "urban heat mitigation systematic review"
+```
+
+`--crossref-bibliographic QUERY` adds `crossref.works` to the same metadata-only discovery report
+alongside OpenAlex and any explicitly selected S2 operations. The exact text becomes Crossref's
+`query.bibliographic`; it is bibliographic lookup, not semantic search. Results merge only by
+existing exact identities. OpenAlex plus Crossref alone does not acquire S2 ownership.
+Optionally set `RESEARCH_ATLAS_CROSSREF_MAILTO` to your own contact address for polite access;
+no signup or paid token is required. Review small local canaries before adopting this experimental
+provider permanently. See [provider details and limitations](providers.md).
 
 ## PowerShell-safe complex bulk queries
 

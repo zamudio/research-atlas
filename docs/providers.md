@@ -7,8 +7,33 @@ normalized `SourceRecord` values. Semantic Scholar relevance search and bulk sea
 operations with different endpoint semantics; Research Atlas never guesses which one a query
 intends. Zotero implements a separate read-only reference-library port.
 
-Crossref is not integrated. A future Crossref adapter can implement the existing literature-source
-contract; only Crossref response mapping and provider-specific retry behavior belong there.
+Crossref implements the same port as an **experimental feasibility adapter**, `CrossrefWorksSearch`
+(`crossref.works`). It is for bibliographic discovery and metadata verification, not a replacement
+for semantic search. Permanent secondary-provider status is pending independent diff review and
+small local canaries; no Run 001 execution is part of this spike.
+
+## Experimental Crossref access and mapping
+
+The [public Crossref REST API](https://www.crossref.org/documentation/retrieve-metadata/rest-api/access-and-authentication/)
+requires no signup or paid token. Metadata Plus is not implemented. The adapter identifies itself
+with a generic User-Agent; optional `RESEARCH_ATLAS_CROSSREF_MAILTO` supplies your contact address
+via `mailto`. No default address is supplied. Public metadata access does not imply full-text access.
+
+`LiteratureQuery.query` maps exactly to `/works?query.bibliographic=...`. Generic parameters
+(including repeated names) are forwarded. `query.bibliographic`, `rows`, `cursor`, `select`, and
+`mailto` are adapter-owned; collisions raise `ValueError`. `offset` and `sample` are also rejected
+because [Crossref cursors cannot be combined with them](https://github.com/CrossRef/rest-api-doc).
+Pagination is sequential, at most 100 items per request, and stops at the logical limit, a short
+page, or an absent cursor. The existing HTTP retry helper honors `Retry-After`; no S2 coordinator
+or ownership guard is acquired for Crossref, and no throughput guarantee is assumed.
+
+The normalized DOI supplies both exact identity and the Crossref provenance record ID. No fuzzy
+matching is added. Missing titles remain empty, authors empty, year/URL null, and type `unknown`.
+Publication year uses the first usable `published`, `published-print`, `published-online`, or
+`issued` year; deposit/index dates are never substituted. The first nonblank title and supplied
+author names are preserved, without inferring affiliations, missing authors, or landing URLs.
+A missing DOI or malformed response fails the operation explicitly rather than inventing identity
+or silently reporting incomplete results. Existing discovery reporting exposes provider failures.
 
 ## Identity and provenance
 

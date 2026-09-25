@@ -19,6 +19,7 @@ from research_atlas.application.ports.literature_source import (
 )
 from research_atlas.infrastructure.config import ProviderSettings
 from research_atlas.infrastructure.providers._http import AttemptObserver, RequestAttemptEvent
+from research_atlas.infrastructure.providers.crossref import CrossrefWorksSearch
 from research_atlas.infrastructure.providers.openalex import OpenAlexLiteratureSource
 from research_atlas.infrastructure.providers.semantic_scholar import (
     SemanticScholarBulkSearch,
@@ -34,6 +35,11 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Discover and normalize a few sources for review")
     parser.add_argument("query", help="OpenAlex search query")
     parser.add_argument("--limit", type=int, default=8, choices=range(1, 11))
+    parser.add_argument(
+        "--crossref-bibliographic",
+        metavar="QUERY",
+        help="also run experimental Crossref bibliographic lookup with this exact query",
+    )
     parser.add_argument(
         "--semantic-scholar-relevance",
         metavar="QUERY",
@@ -93,6 +99,7 @@ async def run_dry_run(
     *,
     limit: int,
     settings: ProviderSettings,
+    crossref_bibliographic_query: str | None = None,
     semantic_scholar_relevance_query: str | None = None,
     semantic_scholar_bulk_query: str | None = None,
     s2_attempt_observer: AttemptObserver | None = None,
@@ -129,6 +136,13 @@ async def run_dry_run(
                 LiteratureQuery(semantic_scholar_bulk_query, limit=limit),
             )
         )
+    if crossref_bibliographic_query is not None:
+        searches.append(
+            LiteratureSearchRequest(
+                CrossrefWorksSearch(mailto=settings.crossref_mailto),
+                LiteratureQuery(crossref_bibliographic_query, limit=limit),
+            )
+        )
     guard = ownership_guard_factory() if uses_semantic_scholar else nullcontext()
     with guard:
         report = await DiscoverSources(searches).execute()
@@ -146,6 +160,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             run_dry_run(
                 args.query,
                 limit=args.limit,
+                crossref_bibliographic_query=args.crossref_bibliographic,
                 semantic_scholar_relevance_query=args.semantic_scholar_relevance,
                 semantic_scholar_bulk_query=semantic_scholar_bulk_query,
                 s2_attempt_observer=(_diagnostic_observer() if args.diagnose_s2_requests else None),
