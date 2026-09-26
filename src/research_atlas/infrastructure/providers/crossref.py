@@ -123,7 +123,7 @@ class CrossrefWorksSearch:
     def _map_work(work: Mapping[str, object]) -> SourceRecord:
         doi = normalize_doi(_text(work.get("DOI")))
         if not doi:
-            raise ValueError("Crossref work requires a DOI for stable identity")
+            raise ValueError("Crossref work requires a DOI for exact source matching")
         raw_titles = work.get("title")
         titles = cast(list[object], raw_titles) if isinstance(raw_titles, list) else []
         title = next((_text(item) for item in titles if _text(item)), "")

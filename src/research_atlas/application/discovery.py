@@ -10,7 +10,7 @@ from research_atlas.application.ports.literature_source import (
     LiteratureSearchRequest,
     LiteratureSourceError,
 )
-from research_atlas.application.source_identity import canonical_identity, merge_sources
+from research_atlas.application.source_identity import resolve_exact_sources
 from research_atlas.domain.execution import SearchParameter
 from research_atlas.domain.studies import SourceRecord
 
@@ -118,7 +118,7 @@ class _ProviderSearchResult:
 
 
 class DiscoverSources:
-    """Search providers independently, then normalize their exact stable identities."""
+    """Search providers independently, then resolve their exact identity evidence."""
 
     def __init__(self, searches: Sequence[LiteratureSearchRequest]) -> None:
         if not searches:
@@ -151,37 +151,28 @@ class DiscoverSources:
                     provider_outcomes=outcomes,
                 )
             )
-        merged = merge_sources(discovered)
-        by_identity = {
-            canonical_identity(record.external_identifiers, record.provider_provenance): record
-            for record in merged
-        }
-        relevance_order = dict.fromkeys(
-            canonical_identity(record.external_identifiers, record.provider_provenance)
-            for record in discovered
-        )
-        sources = tuple(by_identity[identity] for identity in relevance_order)
+        resolution = resolve_exact_sources(discovered)
         memberships: list[DiscoveryMembership] = []
+        input_index = 0
         for search_index, (search, result) in enumerate(zip(self._searches, results, strict=True)):
-            seen_identities: set[str] = set()
+            seen_source_ids: set[UUID] = set()
             for result_position, record in enumerate(result.records, start=1):
-                identity = canonical_identity(
-                    record.external_identifiers, record.provider_provenance
-                )
-                if identity in seen_identities:
+                source_id = resolution.source_ids_by_input[input_index]
+                input_index += 1
+                if source_id in seen_source_ids:
                     continue
-                seen_identities.add(identity)
+                seen_source_ids.add(source_id)
                 memberships.append(
                     DiscoveryMembership(
                         search_index=search_index,
-                        source_id=by_identity[identity].source_id,
+                        source_id=source_id,
                         result_position=result_position,
                         discovery_record_id=_provider_record_id(record, search.source.provider_id),
                     )
                 )
         return DiscoveryReport(
             searches=summaries,
-            sources=sources,
+            sources=resolution.sources,
             provider_outcomes=outcomes,
             memberships=tuple(memberships),
         )

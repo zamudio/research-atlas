@@ -60,8 +60,12 @@ or silently reporting incomplete results. Existing discovery reporting exposes p
 
 ## Identity and provenance
 
-Canonical source identity prefers DOI, then PMID or arXiv, then provider namespace plus provider
-record ID. Only exact normalized stable identities merge; similar titles are not fuzzily merged.
+`source_id` is an opaque UUIDv7 internal entity ID. It is independent of DOI, PMID, PMCID, arXiv,
+provider record IDs, and other bibliographic metadata. Trusted normalized external identifiers and
+typed `provider + provider_record_id` pairs supply exact match keys; unknown identifier namespaces
+remain metadata rather than gaining automatic match authority. Transitively connected exact keys
+merge, while contradictory DOI, PMID, PMCID, or arXiv evidence fails explicitly. Similar titles are
+not fuzzily merged.
 
 `SourceProvenance` records metadata origin. `SourceDiscovery` records which logical research
 search found that source. These providers and their record IDs may differ—for example, a source
