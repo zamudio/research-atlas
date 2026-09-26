@@ -3,7 +3,7 @@
 ## Roles
 
 OpenAlex and Semantic Scholar implement the provider-neutral `LiteratureSource` port and return
-normalized `SourceRecord` values. `openalex.search` is ordinary lexical/full-text discovery;
+normalized `SourceRecord` values. `openalex.search` is ordinary lexical discovery;
 `openalex.semantic` is natural-language semantic discovery and is the preferred product-safe
 semantic candidate currently being evaluated for Research Atlas. Semantic Scholar relevance
 search remains an optional/internal comparator, and its relevance and bulk searches remain
@@ -50,8 +50,9 @@ fail before network access when cursor pagination would be required. The existin
 honors `Retry-After`; no S2 coordinator or ownership guard is acquired for Crossref, and no
 throughput guarantee is assumed.
 
-The normalized DOI supplies both exact identity and the Crossref provenance record ID. No fuzzy
-matching is added. Missing titles remain empty, authors empty, year/URL null, and type `unknown`.
+The normalized DOI supplies both exact identity evidence and the Crossref provenance record ID. No
+fuzzy matching is added. Missing titles remain empty, authors empty, year/URL null, and type
+`unknown`.
 Publication year uses the first usable `published`, `published-print`, `published-online`, or
 `issued` year; deposit/index dates are never substituted. The first nonblank title and supplied
 author names are preserved, without inferring affiliations, missing authors, or landing URLs.

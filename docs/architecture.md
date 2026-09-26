@@ -25,6 +25,9 @@ provider and persistence adapters
 not own project configuration. `ExportBundle` is the boundary that joins both for portability and
 therefore validates the relationship between them.
 
+The accepted boundaries are recorded in the [ADR register](adr/README.md), and canonical identity
+terms are defined in the [naming and identifier glossary](architecture/naming-and-identifiers.md).
+
 ## Definition and execution integrity
 
 A run definition contains question and search-spec IDs, scope, screening and stopping plans,
@@ -76,7 +79,10 @@ of normalized bibliographic metadata. Before execution records exist, applicatio
 one temporary membership per search and exact source identity, including the provider result
 position and an unambiguous provider-local record ID when available. Exact merging rewrites those
 memberships to the final normalized `SourceRecord.source_id` without turning a dry-run into an
-execution.
+execution. The membership's zero-based `search_index` is only an in-memory coordinate into the
+requested searches. It must be resolved to the corresponding durable `search_execution_id` before
+persistence and must never become a durable foreign key. `result_position` remains the provider's
+one-based result rank.
 
 `ProtocolReference(protocol_id, version, phase)` keeps protocols independently evolvable.
 `RecordProvenance.creation_method` applies across import, extraction, synthesis, screening, review,

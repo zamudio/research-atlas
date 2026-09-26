@@ -1,5 +1,9 @@
 # ADR 0001: Durable source identity
 
+## Status
+
+Accepted.
+
 ## Context
 
 Research Atlas previously derived `source_id` as UUIDv5 from one preferred bibliographic or
