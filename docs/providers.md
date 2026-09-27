@@ -79,6 +79,23 @@ metadata.
 `SearchExecution`. Each adapter maps those values into its native request parameters; dry-run
 reports retain them for review rather than silently dropping approved logical inputs.
 
+## Contribution observations
+
+The current adapters normalize provider author names into `SourceRecord.authors`; those strings
+remain bibliographic/display metadata and are not Contributor identity. Future structured mapping
+can capture contribution observations before detail is flattened and retain their role, meaningful
+provider ordering, original provider, and provider-native contributor evidence after exact Source
+merging. Displayed-name equality must not collapse observations.
+
+OpenAlex authorships can supply display names, provider-native Author records, and ORCID when
+available. Semantic Scholar authors can supply display names and provider-native Author records.
+Crossref creator metadata can supply structured names and ORCID. Zotero creator metadata includes
+bibliographically relevant creator names and explicit creator roles. Current adapters primarily
+flatten authors and do not yet preserve every role or identity item; these architecture
+opportunities require no new API calls.
+[ADR 0005](adr/0005-contribution-and-contributor-identity.md) defines the Contributor identity and
+resolution contract.
+
 ## Request safety
 
 OpenAlex sends its optional key only in the authorization header and retains provider-appropriate

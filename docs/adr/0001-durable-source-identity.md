@@ -39,4 +39,6 @@ record identity.
 
 - PostgreSQL tables, repositories, and migrations
 - transactional merging of already-stored source rows
-- authorship and person resolution
+
+Contribution and contributor identity are governed separately by
+[ADR 0005](0005-contribution-and-contributor-identity.md).

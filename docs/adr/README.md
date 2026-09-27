@@ -19,3 +19,4 @@ defines the terms currently used by the architecture.
 | [0002](0002-architectural-boundaries-and-neutrality.md) | Architectural boundaries and neutrality | Accepted |
 | [0003](0003-research-execution-and-provenance-model.md) | Research execution and provenance model | Accepted |
 | [0004](0004-independent-contract-versioning.md) | Independent contract versioning | Accepted |
+| [0005](0005-contribution-and-contributor-identity.md) | Contribution and contributor identity | Accepted |

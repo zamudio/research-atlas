@@ -96,5 +96,6 @@ bundles are immutable portable snapshots; direct package use, local persistence 
 Version 0.6.0 includes an experimental Crossref feasibility adapter, but does not adopt it as a
 permanent secondary provider or authorize Run 001 execution. It adds no billing, authentication,
 tenancy, distributed jobs, PostgreSQL, fuzzy matching, universal evidence ontology, or
-agent-framework coupling. Author/person reconciliation remains deferred to persistence design.
-Run 001 is planned and unexecuted.
+agent-framework coupling. [ADR 0005](adr/0005-contribution-and-contributor-identity.md) defines
+provider-derived contribution observations, exact Contributor identity evidence, and explicit
+resolution without implementing their persistence model. Run 001 is planned and unexecuted.

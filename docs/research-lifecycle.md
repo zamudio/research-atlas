@@ -33,8 +33,9 @@ unambiguous provider-local record ID when available. Repeated appearances within
 the earliest position; appearances across searches remain separate. Dry-run serialization remains
 metadata-only and does not expose execution-domain records. Before persistence, the zero-based
 `search_index` must be resolved to the actual durable `search_execution_id`; the index must never
-become a durable foreign key. Author/person reconciliation is intentionally deferred to persistence
-design.
+become a durable foreign key. Bibliographic contribution is captured first as provider-attributable
+observation evidence; a Contributor link is optional and explicit, and names alone cannot establish
+it. See [ADR 0005](adr/0005-contribution-and-contributor-identity.md).
 
 ## 3. Screen and assess evidence
 

@@ -27,15 +27,27 @@ Canonical concept and name for provider-native record identity involved in an ob
 discovery. It is qualified by provider and is not Atlas Source identity.
 `SourceProvenance.provider_record_id` identifies the provider-native record that supplied normalized
 metadata. `SourceDiscovery.provider_record_id` identifies the provider-native record encountered by
-the particular search execution. Their surrounding provenance records give the values different
-roles, so they need not be equal. Neither value is derived from Atlas `source_id` or an external
-identifier such as DOI or PMID.
+the particular search execution. In a `ContributionObservation`, `provider_record_id` may identify
+a provider-native contributor record. The surrounding record supplies the source, discovery, or
+contributor-record context, so these values need not be equal. A `provider_record_id` is not derived
+from an Atlas entity ID or an external identifier such as DOI, PMID, or ORCID.
 
 ### `external_identifier`
 
 Externally governed identifier such as DOI, PMID, PMCID, arXiv ID, or ORCID, depending on the
 entity and context. A normalized identifier in an explicitly trusted namespace can be exact
 identity evidence, but it remains external evidence rather than an Atlas-owned entity ID.
+
+### `contributor_id`
+
+Atlas-owned durable identity of a resolved bibliographic Contributor. It is opaque and independent
+of names, provider record identifiers, external identifiers, source IDs, contribution roles, and
+positions. Exact evidence can establish equivalence without becoming `contributor_id`.
+
+### `contribution_observation_id`
+
+Atlas-owned identity of one provider-derived contribution observation. It identifies the
+observation record, not the Contributor. An observation may remain unresolved.
 
 ### `search_spec_id`
 
@@ -84,6 +96,10 @@ Near-synonyms such as `canonical_source_id`, `external_source_id`, `provider_sou
 `stable_source_id`, and `source_record_id` must not be introduced unless they represent a genuinely
 distinct architectural concept. Qualify external or provider-owned identifiers by what owns them;
 do not rename the Atlas-owned `source_id` to restate that it is canonical or stable.
+
+For provider-native contributor records, use `provider_record_id`; do not introduce
+`provider_author_id`, `provider_contributor_id`, `author_record_id`, `person_record_id`, or
+`external_author_id` as synonyms.
 
 Illustrative relational naming should use entity-specific canonical names, for example:
 
