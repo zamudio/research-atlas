@@ -65,7 +65,7 @@ def representative_definition() -> RunDefinition:
     return RunDefinition.model_validate(
         {
             "schema_version": "0.2",
-            "records_schema_version": "0.5",
+            "records_schema_version": "0.6",
             "definition_status": "approved",
             "project_id": "contract-test",
             "run_id": "run-contract-test",
@@ -374,7 +374,7 @@ def representative_records() -> ResearchRecords:
 def representative_manifest(records: ResearchRecords) -> ExportBundleManifest:
     return ExportBundleManifest.for_records(
         records,
-        bundle_id="contract-test-0.5",
+        bundle_id="contract-test-0.6",
         generated_at=NOW,
         project_id="contract-test",
         protocol_references=PROTOCOL_REFERENCES,
@@ -400,7 +400,7 @@ def representative_bundle(records: ResearchRecords | None = None) -> ExportBundl
     )
 
 
-def test_records_v05_and_bundle_v01_round_trip_and_export_counts() -> None:
+def test_records_v06_and_bundle_v01_round_trip_and_export_counts() -> None:
     records = representative_records()
     restored = ResearchRecords.model_validate_json(records.model_dump_json())
     bundle = representative_bundle(records)
@@ -409,7 +409,7 @@ def test_records_v05_and_bundle_v01_round_trip_and_export_counts() -> None:
     assert restored == records
     assert bundle_restored == bundle
     assert bundle.manifest.bundle_schema_version == "0.1"
-    assert bundle.manifest.records_schema_version == "0.5"
+    assert bundle.manifest.records_schema_version == "0.6"
     assert "research_questions" not in bundle.manifest.model_dump()
     assert bundle.manifest.counts == ExportCounts.from_records(records)
     assert bundle.manifest.counts.search_executions == 3
@@ -419,7 +419,7 @@ def test_records_v05_and_bundle_v01_round_trip_and_export_counts() -> None:
 
 def test_records_reject_unsupported_schema_version() -> None:
     payload = representative_records().model_dump(mode="json")
-    payload["schema_version"] = "0.4"
+    payload["schema_version"] = "0.5"
 
     with pytest.raises(ValidationError):
         ResearchRecords.model_validate(payload)
@@ -574,17 +574,34 @@ def test_discovery_provider_may_differ_from_metadata_provenance() -> None:
 
     records = ResearchRecords.model_validate(payload)
 
-    assert records.source_discoveries[0].discovery_record_id == "W1"
+    assert records.source_discoveries[0].provider_record_id == "W1"
     assert records.sources[0].provider_provenance[0].provider == "reference-library"
 
 
-def test_discovery_record_id_need_not_match_metadata_provenance() -> None:
+def test_discovery_provider_record_id_need_not_match_metadata_provenance() -> None:
     payload: dict[str, Any] = representative_records().model_dump(mode="json")
-    payload["source_discoveries"][0]["discovery_record_id"] = "different-record"
+    payload["source_discoveries"][0]["provider_record_id"] = "different-record"
 
     records = ResearchRecords.model_validate(payload)
 
-    assert records.source_discoveries[0].discovery_record_id == "different-record"
+    assert records.source_discoveries[0].provider_record_id == "different-record"
+
+
+def test_source_discovery_serializes_and_deserializes_provider_record_id() -> None:
+    records = representative_records()
+    payload: dict[str, Any] = records.model_dump(mode="json")
+
+    assert payload["source_discoveries"][0]["provider_record_id"] == "W1"
+    assert ResearchRecords.model_validate(payload).source_discoveries[0].provider_record_id == "W1"
+
+
+def test_records_v06_rejects_removed_discovery_record_id() -> None:
+    payload: dict[str, Any] = representative_records().model_dump(mode="json")
+    source_discovery = payload["source_discoveries"][0]
+    source_discovery["discovery_record_id"] = source_discovery.pop("provider_record_id")
+
+    with pytest.raises(ValidationError, match="Unexpected keyword argument"):
+        ResearchRecords.model_validate(payload)
 
 
 @pytest.mark.parametrize(
@@ -790,7 +807,7 @@ def test_export_bundle_still_requires_run_definition_manifest_order() -> None:
 
 @pytest.mark.parametrize(
     ("field", "value"),
-    (("bundle_schema_version", "0.2"), ("records_schema_version", "0.4")),
+    (("bundle_schema_version", "0.2"), ("records_schema_version", "0.5")),
 )
 def test_export_manifest_rejects_unsupported_schema_versions(field: str, value: str) -> None:
     payload = representative_manifest(representative_records()).model_dump(mode="json")

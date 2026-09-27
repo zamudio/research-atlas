@@ -32,11 +32,11 @@ def _missing_values(values: Iterable[Hashable], valid_values: Iterable[Hashable]
 
 
 class ResearchRecords(BaseModel):
-    """A v0.5 collection of normalized evidence and research-process records."""
+    """A v0.6 collection of normalized evidence and research-process records."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    schema_version: Literal["0.5"] = "0.5"
+    schema_version: Literal["0.6"] = "0.6"
     sources: tuple[SourceRecord, ...] = ()
     studies: tuple[StudyRecord, ...] = ()
     constructs: tuple[ConstructRecord, ...] = ()

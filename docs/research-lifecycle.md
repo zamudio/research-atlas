@@ -21,9 +21,10 @@ provider-neutral `(name, value)` parameters, requested limit, timing, outcome, r
 safe failure metadata. Provider requests, pages, and retries are not copied into this record.
 
 `SourceDiscovery` connects a successful search execution to a normalized `SourceRecord`. A source
-may be found by multiple searches or providers. `discovery_record_id`, when present, belongs to the
-discovery system. `SourceProvenance` separately records where normalized source metadata came from;
-it need not name the discovery provider or share its record ID.
+may be found by multiple searches or providers. `SourceDiscovery.provider_record_id`, when present,
+identifies the provider-native record encountered by that search execution. `SourceProvenance`
+separately records where normalized source metadata came from; its `provider_record_id` need not
+name the discovery provider or contain the same value.
 
 Application discovery preserves a temporary membership for each search/source pair before an
 execution layer creates `SourceDiscovery`. The membership retains the zero-based requested-search

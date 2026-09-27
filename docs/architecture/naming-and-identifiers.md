@@ -25,11 +25,11 @@ an existing Atlas `source_id`; later metadata must not cause persistence to reco
 
 Canonical concept and name for provider-native record identity involved in an observation or
 discovery. It is qualified by provider and is not Atlas Source identity.
-`SourceProvenance.provider_record_id` identifies a metadata-provenance record. Current code also
-uses `SourceDiscovery.discovery_record_id` to carry provider-native identity captured during
-discovery; that existing field is not a second canonical identifier concept and does not authorize
-additional `*_record_id` synonyms. Future persistence or contract work must consult this glossary
-before retaining, renaming, or introducing identifier terminology.
+`SourceProvenance.provider_record_id` identifies the provider-native record that supplied normalized
+metadata. `SourceDiscovery.provider_record_id` identifies the provider-native record encountered by
+the particular search execution. Their surrounding provenance records give the values different
+roles, so they need not be equal. Neither value is derived from Atlas `source_id` or an external
+identifier such as DOI or PMID.
 
 ### `external_identifier`
 

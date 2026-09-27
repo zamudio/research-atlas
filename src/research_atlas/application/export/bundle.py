@@ -68,7 +68,7 @@ class ExportBundleManifest(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     bundle_schema_version: Literal["0.1"]
-    records_schema_version: Literal["0.5"]
+    records_schema_version: Literal["0.6"]
     bundle_id: str
     generated_at: datetime
     project_id: str

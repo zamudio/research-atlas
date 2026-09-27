@@ -89,7 +89,7 @@ class DiscoveryMembership:
     search_index: int
     source_id: UUID
     result_position: int
-    discovery_record_id: str | None = None
+    provider_record_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -167,7 +167,7 @@ class DiscoverSources:
                         search_index=search_index,
                         source_id=source_id,
                         result_position=result_position,
-                        discovery_record_id=_provider_record_id(record, search.source.provider_id),
+                        provider_record_id=_provider_record_id(record, search.source.provider_id),
                     )
                 )
         return DiscoveryReport(

@@ -71,7 +71,7 @@ or application records.
 
 ## Referential integrity and portability
 
-`ResearchRecords` schema 0.5 rejects duplicate IDs, dangling references, inconsistent discovery
+`ResearchRecords` schema 0.6 rejects duplicate IDs, dangling references, inconsistent discovery
 and screening chains, and invalid append-only screening/evidence supersession. A
 `SourceDiscovery` must agree with its successful `SearchExecution` and run. It records the
 discovery mechanism and may legitimately differ from `SourceProvenance`, which records the origin

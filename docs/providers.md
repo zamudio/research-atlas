@@ -71,8 +71,9 @@ not fuzzily merged.
 `SourceProvenance` records metadata origin. `SourceDiscovery` records which logical research
 search found that source. These providers and their record IDs may differ—for example, a source
 can be discovered manually or through Elicit while its normalized metadata comes from Crossref or
-Zotero. `discovery_record_id` belongs to the discovery system and is not matched to metadata
-provenance.
+Zotero. `SourceDiscovery.provider_record_id` belongs to the discovery system and need not match
+`SourceProvenance.provider_record_id`, which identifies the record that supplied normalized
+metadata.
 
 `LiteratureQuery.parameters` carries the same generic `(name, value)` data as `SearchSpec` and
 `SearchExecution`. Each adapter maps those values into its native request parameters; dry-run

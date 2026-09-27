@@ -238,7 +238,7 @@ def test_shared_source_keeps_each_search_membership_and_original_position() -> N
     )
     assert [membership.search_index for membership in memberships] == [0, 1, 2]
     assert [membership.result_position for membership in memberships] == [2, 7, 1]
-    assert [membership.discovery_record_id for membership in memberships] == [
+    assert [membership.provider_record_id for membership in memberships] == [
         "W0-2",
         "W1-7",
         "W2-1",
@@ -286,7 +286,7 @@ def test_membership_record_id_stays_with_its_original_provider_result() -> None:
     )
 
     assert len(report.sources) == 1
-    assert [membership.discovery_record_id for membership in report.memberships] == [
+    assert [membership.provider_record_id for membership in report.memberships] == [
         "W1",
         "S1",
     ]
@@ -312,7 +312,7 @@ def test_membership_omits_ambiguous_provider_record_id() -> None:
         DiscoverSources((_request(FakeLiteratureSource("openalex", (ambiguous,))),)).execute()
     )
 
-    assert report.memberships[0].discovery_record_id is None
+    assert report.memberships[0].provider_record_id is None
 
 
 def test_execution_ready_search_spec_maps_losslessly_to_literature_query() -> None:

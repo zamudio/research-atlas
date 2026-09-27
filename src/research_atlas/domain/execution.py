@@ -69,7 +69,7 @@ class SourceDiscovery:
     run_id: str
     source_id: UUID
     discovered_at: datetime
-    discovery_record_id: str | None = None
+    provider_record_id: str | None = None
     result_position: int | None = None
 
     def __post_init__(self) -> None:

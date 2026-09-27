@@ -1,5 +1,5 @@
 schema_version: "0.2"
-records_schema_version: "0.5"
+records_schema_version: "0.6"
 definition_status: "planned"
 project_id: "ai-tutor"
 run_id: "learning-foundations-001"

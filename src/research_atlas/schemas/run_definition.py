@@ -131,7 +131,7 @@ class RunDefinition(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     schema_version: Literal["0.2"]
-    records_schema_version: Literal["0.5"]
+    records_schema_version: Literal["0.6"]
     definition_status: Literal["planned", "approved", "retired"]
     project_id: str = Field(min_length=1)
     run_id: str = Field(min_length=1)

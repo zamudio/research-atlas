@@ -19,7 +19,7 @@ For installation and a compact project overview, start with the [repository READ
 
 - Package version: 0.6.0
 - Run-definition schema: 0.2
-- Records schema: 0.5
+- Records schema: 0.6
 - Export-bundle schema: 0.1
 - Implemented OpenAlex operations: lexical works search and semantic search
 - Implemented Semantic Scholar operations: optional relevance and bulk search

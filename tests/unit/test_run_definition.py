@@ -15,7 +15,7 @@ def test_planned_run_definition_yaml_validates_without_exact_queries() -> None:
     definition = RunDefinition.from_yaml(RUN_DEFINITION_PATH)
 
     assert definition.schema_version == "0.2"
-    assert definition.records_schema_version == "0.5"
+    assert definition.records_schema_version == "0.6"
     assert definition.definition_status == "planned"
     assert definition.run_id == "learning-foundations-001"
     assert all(not spec.execution_ready for spec in definition.search_plan.search_specs)
@@ -98,7 +98,7 @@ def test_execution_ready_search_spec_requires_requested_limit() -> None:
 
 @pytest.mark.parametrize(
     ("field", "value"),
-    (("schema_version", "0.3"), ("records_schema_version", "0.6")),
+    (("schema_version", "0.3"), ("records_schema_version", "0.5")),
 )
 def test_run_definition_rejects_unsupported_schema_versions(field: str, value: str) -> None:
     definition = RunDefinition.from_yaml(RUN_DEFINITION_PATH)

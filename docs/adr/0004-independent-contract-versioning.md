@@ -17,7 +17,7 @@ The following versions evolve independently:
 | --- | --- | --- |
 | Python package/software | `0.6.0` | `pyproject.toml` |
 | `RunDefinition` schema | `0.2` | `RunDefinition.schema_version` |
-| `ResearchRecords` schema | `0.5` | `ResearchRecords.schema_version` |
+| `ResearchRecords` schema | `0.6` | `ResearchRecords.schema_version` |
 | `ExportBundle` schema | `0.1` | `ExportBundleManifest.bundle_schema_version` |
 
 Persistence and PostgreSQL development belongs to the software `0.6.x` line. That work does not by
@@ -27,6 +27,10 @@ schema to adopt the same number.
 A serialized schema version changes only when that serialized contract changes. Conversely, a
 schema may evolve when its own contract requires it, independently of the package, other schemas,
 or the storage implementation.
+
+ResearchRecords `0.6` renamed discovery provider identity to the canonical
+`SourceDiscovery.provider_record_id`. The package remains `0.6.0`, RunDefinition remains `0.2`, and
+ExportBundle remains `0.1`; those contracts now reference ResearchRecords `0.6` where applicable.
 
 ## Consequences
 
