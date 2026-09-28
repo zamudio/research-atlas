@@ -2,15 +2,17 @@
 
 import asyncio
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TypedDict
 from uuid import UUID
 
 from research_atlas.application.ports.literature_source import (
+    LiteratureRecord,
     LiteratureSearchRequest,
     LiteratureSourceError,
 )
 from research_atlas.application.source_identity import resolve_exact_sources
+from research_atlas.domain.contributors import ContributionObservation
 from research_atlas.domain.execution import SearchParameter
 from research_atlas.domain.studies import SourceRecord
 
@@ -50,12 +52,31 @@ class SerializedSearchSummary(TypedDict):
     parameters: list[SerializedSearchParameter]
 
 
+class SerializedContributorIdentifier(TypedDict):
+    namespace: str
+    value: str
+
+
+class SerializedContributionObservation(TypedDict):
+    contribution_observation_id: str
+    source_id: str
+    display_name: str
+    role: str
+    provider: str
+    provider_record_id: str | None
+    provider_position: int | None
+    external_identifiers: list[SerializedContributorIdentifier]
+    observed_contributor_kind: str | None
+    retrieved_at: str | None
+
+
 class SerializedDiscoveryReport(TypedDict):
     searches: list[SerializedSearchSummary]
     provider_outcomes: list[SerializedProviderOutcome]
     normalized_source_count: int
     cross_provider_merge_count: int
     sources: list[SerializedSource]
+    contribution_observations: list[SerializedContributionObservation]
 
 
 @dataclass(frozen=True, slots=True)
@@ -100,6 +121,7 @@ class DiscoveryReport:
     sources: tuple[SourceRecord, ...]
     provider_outcomes: tuple[ProviderOutcome, ...]
     memberships: tuple[DiscoveryMembership, ...] = ()
+    contribution_observations: tuple[ContributionObservation, ...] = ()
 
 
 class DiscoveryFailedError(RuntimeError):
@@ -114,7 +136,7 @@ class DiscoveryFailedError(RuntimeError):
 @dataclass(frozen=True, slots=True)
 class _ProviderSearchResult:
     outcome: ProviderOutcome
-    records: tuple[SourceRecord, ...]
+    records: tuple[LiteratureRecord, ...]
 
 
 class DiscoverSources:
@@ -151,12 +173,17 @@ class DiscoverSources:
                     provider_outcomes=outcomes,
                 )
             )
-        resolution = resolve_exact_sources(discovered)
+        resolution = resolve_exact_sources(record.source for record in discovered)
+        contribution_observations = tuple(
+            replace(observation, source_id=resolution.source_ids_by_input[input_index])
+            for input_index, record in enumerate(discovered)
+            for observation in record.contribution_observations
+        )
         memberships: list[DiscoveryMembership] = []
         input_index = 0
         for search_index, (search, result) in enumerate(zip(self._searches, results, strict=True)):
             seen_source_ids: set[UUID] = set()
-            for result_position, record in enumerate(result.records, start=1):
+            for result_position, literature_record in enumerate(result.records, start=1):
                 source_id = resolution.source_ids_by_input[input_index]
                 input_index += 1
                 if source_id in seen_source_ids:
@@ -167,7 +194,9 @@ class DiscoverSources:
                         search_index=search_index,
                         source_id=source_id,
                         result_position=result_position,
-                        provider_record_id=_provider_record_id(record, search.source.provider_id),
+                        provider_record_id=_provider_record_id(
+                            literature_record.source, search.source.provider_id
+                        ),
                     )
                 )
         return DiscoveryReport(
@@ -175,6 +204,7 @@ class DiscoverSources:
             sources=resolution.sources,
             provider_outcomes=outcomes,
             memberships=tuple(memberships),
+            contribution_observations=contribution_observations,
         )
 
     @staticmethod
@@ -259,6 +289,32 @@ def serialize_sources(records: Sequence[SourceRecord]) -> list[SerializedSource]
     return [serialize_source(record) for record in records]
 
 
+def serialize_contribution_observation(
+    observation: ContributionObservation,
+) -> SerializedContributionObservation:
+    """Create deterministic, JSON-friendly contribution evidence for dry-run review."""
+
+    identifiers = sorted(
+        observation.external_identifiers,
+        key=lambda identifier: (identifier.namespace, identifier.value),
+    )
+    return {
+        "contribution_observation_id": str(observation.contribution_observation_id),
+        "source_id": str(observation.source_id),
+        "display_name": observation.display_name,
+        "role": observation.role,
+        "provider": observation.provider,
+        "provider_record_id": observation.provider_record_id,
+        "provider_position": observation.provider_position,
+        "external_identifiers": [
+            {"namespace": identifier.namespace, "value": identifier.value}
+            for identifier in identifiers
+        ],
+        "observed_contributor_kind": observation.observed_contributor_kind,
+        "retrieved_at": observation.retrieved_at.isoformat() if observation.retrieved_at else None,
+    }
+
+
 def serialize_report(report: DiscoveryReport) -> SerializedDiscoveryReport:
     """Serialize provider health and normalized sources for a dry-run review."""
 
@@ -294,4 +350,8 @@ def serialize_report(report: DiscoveryReport) -> SerializedDiscoveryReport:
             for source in report.sources
         ),
         "sources": serialize_sources(report.sources),
+        "contribution_observations": [
+            serialize_contribution_observation(observation)
+            for observation in report.contribution_observations
+        ],
     }

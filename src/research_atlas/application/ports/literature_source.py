@@ -3,6 +3,7 @@
 from dataclasses import dataclass
 from typing import Protocol, Self
 
+from research_atlas.domain.contributors import ContributionObservation
 from research_atlas.domain.execution import SearchParameter
 from research_atlas.domain.studies import SourceRecord
 
@@ -25,6 +26,23 @@ class LiteratureQuery:
     parameters: tuple[SearchParameter, ...] = ()
 
 
+@dataclass(frozen=True, slots=True)
+class LiteratureRecord:
+    """One provider source candidate and its attached contribution evidence."""
+
+    source: SourceRecord
+    contribution_observations: tuple[ContributionObservation, ...] = ()
+
+    def __post_init__(self) -> None:
+        if any(
+            observation.source_id != self.source.source_id
+            for observation in self.contribution_observations
+        ):
+            raise ValueError(
+                "every contribution observation must reference the LiteratureRecord source_id"
+            )
+
+
 class LiteratureSource(Protocol):
     """One external discovery operation; implementations belong outside the domain."""
 
@@ -34,7 +52,7 @@ class LiteratureSource(Protocol):
     @property
     def operation_id(self) -> str: ...
 
-    async def search(self, query: LiteratureQuery) -> tuple[SourceRecord, ...]: ...
+    async def search(self, query: LiteratureQuery) -> tuple[LiteratureRecord, ...]: ...
 
 
 class SearchSpecification(Protocol):

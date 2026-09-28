@@ -24,7 +24,19 @@ def _items() -> list[Mapping[str, Any]]:
                 "key": "ITEM1",
                 "itemType": "journalArticle",
                 "title": "A Zotero paper",
-                "creators": [{"firstName": "Dana", "lastName": "Scholar"}],
+                "creators": [
+                    {
+                        "creatorType": "author",
+                        "firstName": "Dana",
+                        "lastName": "Scholar",
+                    },
+                    {"creatorType": "editor", "name": "Study Group"},
+                    {
+                        "creatorType": "translator",
+                        "firstName": "Terry",
+                        "lastName": "Translator",
+                    },
+                ],
                 "date": "2020-06-01",
                 "DOI": "doi:10.1000/ZOTERO",
                 "url": "https://example.test/zotero",
@@ -43,7 +55,7 @@ def test_zotero_maps_bibliographic_item() -> None:
 
     assert record is not None
     assert record.title == "A Zotero paper"
-    assert record.authors == ("Dana Scholar",)
+    assert record.authors == ("Dana Scholar", "Study Group", "Terry Translator")
     assert record.year == 2020
     assert record.source_type == "journalarticle"
     assert {(item.namespace, item.value) for item in record.external_identifiers} >= {
@@ -52,6 +64,36 @@ def test_zotero_maps_bibliographic_item() -> None:
         ("arxiv", "2001.00001"),
         ("zotero", "ITEM1"),
     }
+
+    structured = library.get_literature_record("ITEM1")
+    assert structured is not None
+    assert structured.source.title == record.title
+    assert [item.display_name for item in structured.contribution_observations] == [
+        "Dana Scholar",
+        "Study Group",
+        "Terry Translator",
+    ]
+    assert [item.role for item in structured.contribution_observations] == [
+        "author",
+        "editor",
+        "translator",
+    ]
+    assert [item.provider_position for item in structured.contribution_observations] == [1, 2, 3]
+    assert [item.provider_record_id for item in structured.contribution_observations] == [
+        None,
+        None,
+        None,
+    ]
+    assert [item.observed_contributor_kind for item in structured.contribution_observations] == [
+        "person",
+        "unknown",
+        "person",
+    ]
+    assert all(item.provider == "zotero" for item in structured.contribution_observations)
+    assert all(
+        item.retrieved_at == structured.source.provider_provenance[0].retrieved_at
+        for item in structured.contribution_observations
+    )
 
 
 def test_zotero_ignores_notes_and_attachments() -> None:

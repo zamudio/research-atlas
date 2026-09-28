@@ -7,10 +7,12 @@ import pytest
 from research_atlas.application.discovery import DiscoverSources, serialize_report
 from research_atlas.application.ports.literature_source import (
     LiteratureQuery,
+    LiteratureRecord,
     LiteratureSearchRequest,
 )
+from research_atlas.domain.contributors import ContributorIdentifier
 from research_atlas.domain.execution import SearchParameter
-from research_atlas.domain.studies import ExternalIdentifier, SourceRecord
+from research_atlas.domain.studies import ExternalIdentifier
 from research_atlas.infrastructure.providers.crossref import CrossrefWorksSearch
 from research_atlas.infrastructure.providers.openalex import OpenAlexLiteratureSource
 from research_atlas.infrastructure.providers.semantic_scholar import SemanticScholarRelevanceSearch
@@ -20,8 +22,8 @@ def search(
     handler: Callable[[httpx.Request], httpx.Response],
     query: LiteratureQuery | None = None,
     mailto: str | None = None,
-) -> tuple[SourceRecord, ...]:
-    async def run() -> tuple[SourceRecord, ...]:
+) -> tuple[LiteratureRecord, ...]:
+    async def run() -> tuple[LiteratureRecord, ...]:
         async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
             return await CrossrefWorksSearch(mailto=mailto, client=client).search(
                 query if query is not None else LiteratureQuery("exact bibliography", limit=5)
@@ -57,7 +59,11 @@ def test_request_mapping_parameters_and_retry_after() -> None:
                             "DOI": "https://doi.org/10.1000/EXAMPLE",
                             "title": [" Example title "],
                             "author": [
-                                {"given": "Ada", "family": "Author"},
+                                {
+                                    "given": "Ada",
+                                    "family": "Author",
+                                    "ORCID": "https://orcid.org/0000-0002-1825-0097",
+                                },
                                 {"name": "Study Group"},
                                 {"family": "Writer"},
                                 {},
@@ -85,7 +91,8 @@ def test_request_mapping_parameters_and_retry_after() -> None:
         mailto="researcher@example.test",
     )
     assert calls == 2
-    record = records[0]
+    literature_record = records[0]
+    record = literature_record.source
     assert record.title == "Example title"
     assert record.authors == ("Ada Author", "Study Group", "Writer")
     assert record.year == 2022
@@ -95,6 +102,32 @@ def test_request_mapping_parameters_and_retry_after() -> None:
     provenance = record.provider_provenance[0]
     assert (provenance.provider, provenance.provider_record_id) == ("crossref", "10.1000/example")
     assert provenance.retrieved_at is not None and provenance.retrieved_at.utcoffset() is not None
+    assert [item.display_name for item in literature_record.contribution_observations] == [
+        "Ada Author",
+        "Study Group",
+        "Writer",
+    ]
+    first, second, third = literature_record.contribution_observations
+    assert (
+        first.role,
+        first.provider,
+        first.provider_record_id,
+        first.provider_position,
+        first.external_identifiers,
+        first.observed_contributor_kind,
+    ) == (
+        "author",
+        "crossref",
+        None,
+        1,
+        (ContributorIdentifier("orcid", "0000-0002-1825-0097"),),
+        "person",
+    )
+    assert second.provider_position == 2
+    assert second.observed_contributor_kind == "unknown"
+    assert third.provider_position == 3
+    assert third.observed_contributor_kind == "person"
+    assert provenance.retrieved_at == first.retrieved_at == second.retrieved_at
 
 
 @pytest.mark.parametrize(
@@ -136,7 +169,7 @@ def test_cursor_pagination_uses_new_token_and_stops_at_logical_limit() -> None:
     )
     assert len(records) == 205
     assert len(requests) == 3
-    assert records[-1].external_identifiers[0].value == "10.1000/3-4"
+    assert records[-1].source.external_identifiers[0].value == "10.1000/3-4"
 
 
 @pytest.mark.parametrize("sort", ["issued", "published", "published-print", "published-online"])
@@ -214,7 +247,7 @@ def test_missing_or_malformed_optional_metadata_remains_explicit() -> None:
     )
     for work in works:
         response = httpx.Response(200, json={"message": {"items": [work]}})
-        record = search(lambda _request, response=response: response)[0]
+        record = search(lambda _request, response=response: response)[0].source
         assert record.title == ""
         assert record.authors == ()
         assert record.year is None
@@ -237,7 +270,7 @@ def test_publication_year_fallbacks(field: str) -> None:
             }
         },
     )
-    assert search(lambda _request: response)[0].year == 2021
+    assert search(lambda _request: response)[0].source.year == 2021
 
 
 INVALID_PAYLOADS: list[object] = [

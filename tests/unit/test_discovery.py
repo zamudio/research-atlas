@@ -2,6 +2,7 @@ import asyncio
 
 import pytest
 
+from research_atlas.application.contributor_identity import observed_contribution
 from research_atlas.application.discovery import (
     DiscoverSources,
     DiscoveryFailedError,
@@ -10,12 +11,14 @@ from research_atlas.application.discovery import (
 )
 from research_atlas.application.ports.literature_source import (
     LiteratureQuery,
+    LiteratureRecord,
     LiteratureSearchRequest,
     LiteratureSourceError,
 )
 from research_atlas.application.source_identity import identified_source
+from research_atlas.domain.contributors import ContributorIdentifier
 from research_atlas.domain.execution import SearchParameter
-from research_atlas.domain.studies import ExternalIdentifier, SourceProvenance, SourceRecord
+from research_atlas.domain.studies import ExternalIdentifier, SourceProvenance
 from research_atlas.schemas.run_definition import SearchSpec
 
 
@@ -23,7 +26,7 @@ class FakeLiteratureSource:
     def __init__(
         self,
         provider_id: str,
-        records: tuple[SourceRecord, ...] = (),
+        records: tuple[LiteratureRecord, ...] = (),
         error: Exception | None = None,
         *,
         operation_id: str | None = None,
@@ -34,22 +37,50 @@ class FakeLiteratureSource:
         self.error = error
         self.queries: list[LiteratureQuery] = []
 
-    async def search(self, query: LiteratureQuery) -> tuple[SourceRecord, ...]:
+    async def search(self, query: LiteratureQuery) -> tuple[LiteratureRecord, ...]:
         self.queries.append(query)
         if self.error is not None:
             raise self.error
         return self.records
 
 
-def _record(provider: str, provider_id: str, doi: str) -> SourceRecord:
-    return identified_source(
-        title=f"Source {doi}",
-        authors=("A. Author",),
-        year=2023,
-        source_type="article",
-        provenance=(SourceProvenance(provider, provider_id),),
-        identifiers=(ExternalIdentifier("doi", doi),),
-        source_url="https://example.test/paper",
+def _record(provider: str, provider_id: str, doi: str) -> LiteratureRecord:
+    return LiteratureRecord(
+        identified_source(
+            title=f"Source {doi}",
+            authors=("A. Author",),
+            year=2023,
+            source_type="article",
+            provenance=(SourceProvenance(provider, provider_id),),
+            identifiers=(ExternalIdentifier("doi", doi),),
+            source_url="https://example.test/paper",
+        )
+    )
+
+
+def _record_with_observation(
+    provider: str,
+    provider_id: str,
+    doi: str,
+    display_name: str,
+    *,
+    contributor_provider_record_id: str | None = None,
+) -> LiteratureRecord:
+    source = _record(provider, provider_id, doi).source
+    return LiteratureRecord(
+        source,
+        (
+            observed_contribution(
+                source_id=source.source_id,
+                display_name=display_name,
+                role="author",
+                provider=provider,
+                provider_record_id=contributor_provider_record_id,
+                provider_position=1,
+                external_identifiers=(ContributorIdentifier("orcid", "0000-0002-1825-0097"),),
+                observed_contributor_kind="person",
+            ),
+        ),
     )
 
 
@@ -110,6 +141,7 @@ def test_all_provider_failures_raise_with_observable_outcomes() -> None:
         asyncio.run(DiscoverSources(tuple(_request(provider) for provider in providers)).execute())
 
     assert caught.value.report.sources == ()
+    assert caught.value.report.contribution_observations == ()
     assert [outcome.provider for outcome in caught.value.report.provider_outcomes] == [
         "openalex",
         "semantic_scholar",
@@ -246,7 +278,10 @@ def test_shared_source_keeps_each_search_membership_and_original_position() -> N
 
 
 def test_failed_search_contributes_no_memberships() -> None:
-    failed = FakeLiteratureSource("openalex", error=RuntimeError("unavailable"))
+    failed_record = _record_with_observation(
+        "openalex", "W-failed", "10.1/failed", "Failed Evidence"
+    )
+    failed = FakeLiteratureSource("openalex", (failed_record,), error=RuntimeError("unavailable"))
     successful = FakeLiteratureSource(
         "semantic_scholar",
         (_record("semantic_scholar", "S1", "10.1/one"),),
@@ -255,6 +290,31 @@ def test_failed_search_contributes_no_memberships() -> None:
     report = asyncio.run(DiscoverSources((_request(failed), _request(successful))).execute())
 
     assert report.memberships == (DiscoveryMembership(1, report.sources[0].source_id, 1, "S1"),)
+    assert report.contribution_observations == ()
+
+
+def test_provider_result_count_does_not_count_contribution_observations() -> None:
+    source = _record("openalex", "W1", "10.1/one").source
+    record = LiteratureRecord(
+        source,
+        tuple(
+            observed_contribution(
+                source_id=source.source_id,
+                display_name=name,
+                role="author",
+                provider="openalex",
+                provider_position=position,
+            )
+            for position, name in enumerate(("First Author", "Second Author"), start=1)
+        ),
+    )
+
+    report = asyncio.run(
+        DiscoverSources((_request(FakeLiteratureSource("openalex", (record,))),)).execute()
+    )
+
+    assert report.provider_outcomes[0].raw_result_count == 1
+    assert len(report.contribution_observations) == 2
 
 
 def test_same_search_duplicate_keeps_earliest_position_and_provider_record_id() -> None:
@@ -309,7 +369,9 @@ def test_membership_omits_ambiguous_provider_record_id() -> None:
     )
 
     report = asyncio.run(
-        DiscoverSources((_request(FakeLiteratureSource("openalex", (ambiguous,))),)).execute()
+        DiscoverSources(
+            (_request(FakeLiteratureSource("openalex", (LiteratureRecord(ambiguous),))),)
+        ).execute()
     )
 
     assert report.memberships[0].provider_record_id is None
@@ -443,5 +505,120 @@ def test_dry_run_report_serialization_includes_provider_health_and_counts() -> N
         },
     ]
     assert payload["sources"][0]["external_identifiers"] == {"doi": ["10.1/one"]}
+    assert payload["contribution_observations"] == []
     assert "research_run" not in payload["sources"][0]
     assert "memberships" not in payload
+
+
+def test_literature_record_rejects_observation_for_a_different_source() -> None:
+    first = _record("openalex", "W1", "10.1/first").source
+    second = _record("openalex", "W2", "10.1/second").source
+    observation = observed_contribution(
+        source_id=second.source_id,
+        display_name="A. Author",
+        role="author",
+        provider="openalex",
+    )
+
+    with pytest.raises(ValueError, match="must reference the LiteratureRecord source_id"):
+        LiteratureRecord(first, (observation,))
+
+
+def test_discovery_preserves_and_remaps_observations_without_changing_identity() -> None:
+    openalex_record = _record_with_observation(
+        "openalex",
+        "W1",
+        "10.1/shared",
+        "Same Name",
+        contributor_provider_record_id="A1",
+    )
+    semantic_record = _record_with_observation(
+        "semantic_scholar",
+        "S1",
+        "10.1/shared",
+        "Same Name",
+        contributor_provider_record_id="s2-author-1",
+    )
+    original_observations = (
+        *openalex_record.contribution_observations,
+        *semantic_record.contribution_observations,
+    )
+
+    report = asyncio.run(
+        DiscoverSources(
+            (
+                _request(FakeLiteratureSource("openalex", (openalex_record,))),
+                _request(FakeLiteratureSource("semantic_scholar", (semantic_record,))),
+            )
+        ).execute()
+    )
+
+    assert len(report.sources) == 1
+    assert [outcome.raw_result_count for outcome in report.provider_outcomes] == [1, 1]
+    assert len(report.contribution_observations) == 2
+    assert [item.display_name for item in report.contribution_observations] == [
+        "Same Name",
+        "Same Name",
+    ]
+    assert [item.contribution_observation_id for item in report.contribution_observations] == [
+        item.contribution_observation_id for item in original_observations
+    ]
+    assert [item.provider_record_id for item in report.contribution_observations] == [
+        "A1",
+        "s2-author-1",
+    ]
+    assert {item.source_id for item in report.contribution_observations} == {
+        report.sources[0].source_id
+    }
+
+
+def test_same_search_source_collapse_keeps_every_observation() -> None:
+    first = _record_with_observation(
+        "openalex", "W-early", "10.1/shared", "A. Author", contributor_provider_record_id="A1"
+    )
+    second = _record_with_observation(
+        "openalex", "W-late", "10.1/shared", "A. Author", contributor_provider_record_id="A1"
+    )
+
+    report = asyncio.run(
+        DiscoverSources((_request(FakeLiteratureSource("openalex", (first, second))),)).execute()
+    )
+
+    assert len(report.sources) == 1
+    assert report.provider_outcomes[0].raw_result_count == 2
+    assert len(report.memberships) == 1
+    assert len(report.contribution_observations) == 2
+    assert [item.contribution_observation_id for item in report.contribution_observations] == [
+        first.contribution_observations[0].contribution_observation_id,
+        second.contribution_observations[0].contribution_observation_id,
+    ]
+    assert all(
+        item.source_id == report.sources[0].source_id for item in report.contribution_observations
+    )
+
+
+def test_serialized_report_contains_structured_contribution_observations() -> None:
+    record = _record_with_observation(
+        "openalex", "W1", "10.1/one", "Byline Name", contributor_provider_record_id="A1"
+    )
+    report = asyncio.run(
+        DiscoverSources((_request(FakeLiteratureSource("openalex", (record,))),)).execute()
+    )
+
+    payload = serialize_report(report)
+    serialized = payload["contribution_observations"][0]
+
+    assert serialized == {
+        "contribution_observation_id": str(
+            record.contribution_observations[0].contribution_observation_id
+        ),
+        "source_id": str(report.sources[0].source_id),
+        "display_name": "Byline Name",
+        "role": "author",
+        "provider": "openalex",
+        "provider_record_id": "A1",
+        "provider_position": 1,
+        "external_identifiers": [{"namespace": "orcid", "value": "0000-0002-1825-0097"}],
+        "observed_contributor_kind": "person",
+        "retrieved_at": None,
+    }

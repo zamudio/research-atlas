@@ -11,10 +11,11 @@ from research_atlas.application.discovery import (
 )
 from research_atlas.application.ports.literature_source import (
     LiteratureQuery,
+    LiteratureRecord,
     LiteratureSearchRequest,
 )
+from research_atlas.domain.contributors import ContributorIdentifier
 from research_atlas.domain.execution import SearchParameter
-from research_atlas.domain.studies import SourceRecord
 from research_atlas.infrastructure.providers import openalex
 from research_atlas.infrastructure.providers.openalex import (
     OPENALEX_SEMANTIC_MAXIMUM_QUERY_CHARACTERS,
@@ -70,7 +71,15 @@ def test_openalex_maps_mocked_work_and_retries_rate_limit() -> None:
                         "doi": "https://doi.org/10.1000/EXAMPLE",
                         "title": "Example result",
                         "authorships": [
-                            {"author": {"display_name": "Ada Author"}},
+                            {
+                                "raw_author_name": "A. Author",
+                                "raw_orcid": "https://orcid.org/0000-0002-1694-233X",
+                                "author": {
+                                    "id": "https://openalex.org/A123",
+                                    "display_name": "Ada Author",
+                                    "orcid": "https://orcid.org/0000-0002-1825-0097",
+                                },
+                            },
                             {"author": {"display_name": "Ben Writer"}},
                         ],
                         "publication_year": 2022,
@@ -107,7 +116,8 @@ def test_openalex_maps_mocked_work_and_retries_rate_limit() -> None:
 
     assert calls == 2
     assert len(records) == 1
-    record = records[0]
+    literature_record = records[0]
+    record = literature_record.source
     assert record.title == "Example result"
     assert record.authors == ("Ada Author", "Ben Writer")
     assert record.year == 2022
@@ -117,6 +127,31 @@ def test_openalex_maps_mocked_work_and_retries_rate_limit() -> None:
         (item.namespace, item.value) for item in record.external_identifiers
     }
     assert ("pmid", "42") in {(item.namespace, item.value) for item in record.external_identifiers}
+    first, second = literature_record.contribution_observations
+    assert (
+        first.display_name,
+        first.role,
+        first.provider,
+        first.provider_record_id,
+        first.provider_position,
+        first.external_identifiers,
+        first.observed_contributor_kind,
+    ) == (
+        "A. Author",
+        "author",
+        "openalex",
+        "A123",
+        1,
+        (ContributorIdentifier("orcid", "0000-0002-1825-0097"),),
+        "person",
+    )
+    assert ContributorIdentifier("orcid", "0000-0002-1694-233X") not in (first.external_identifiers)
+    assert second.display_name == "Ben Writer"
+    assert second.provider_record_id is None
+    assert second.external_identifiers == ()
+    assert second.provider_position == 2
+    assert record.provider_provenance[0].retrieved_at == first.retrieved_at == second.retrieved_at
+    assert first.retrieved_at is not None and first.retrieved_at.utcoffset() is not None
 
 
 def test_authenticated_openalex_uses_bearer_header_without_key_in_request_data() -> None:
@@ -199,7 +234,7 @@ def test_openalex_semantic_uses_exact_mode_forwards_parameters_and_preserves_ord
             },
         )
 
-    async def run_search() -> tuple[SourceRecord, ...]:
+    async def run_search() -> tuple[LiteratureRecord, ...]:
         clock = FakeMonotonicClock()
         async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
             source = OpenAlexSemanticSearch(
@@ -219,15 +254,17 @@ def test_openalex_semantic_uses_exact_mode_forwards_parameters_and_preserves_ord
     records = asyncio.run(run_search())
 
     assert calls == 1
-    assert [record.title for record in records] == [f"Result {work_id}" for work_id in work_ids]
-    assert [record.provider_provenance[0].provider_record_id for record in records] == list(
+    assert [record.source.title for record in records] == [
+        f"Result {work_id}" for work_id in work_ids
+    ]
+    assert [record.source.provider_provenance[0].provider_record_id for record in records] == list(
         work_ids
     )
-    assert records[0].authors == ("Ada Author",)
-    assert records[0].year == 2024
-    assert records[0].source_type == "article"
-    assert records[0].source_url == "https://example.test/W3"
-    assert {(item.namespace, item.value) for item in records[0].external_identifiers} == {
+    assert records[0].source.authors == ("Ada Author",)
+    assert records[0].source.year == 2024
+    assert records[0].source.source_type == "article"
+    assert records[0].source.source_url == "https://example.test/W3"
+    assert {(item.namespace, item.value) for item in records[0].source.external_identifiers} == {
         ("doi", "10.1000/w3"),
         ("openalex", "W3"),
         ("pmid", "3"),

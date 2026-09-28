@@ -3,7 +3,8 @@
 ## Roles
 
 OpenAlex and Semantic Scholar implement the provider-neutral `LiteratureSource` port and return
-normalized `SourceRecord` values. `openalex.search` is ordinary lexical discovery;
+normalized `LiteratureRecord` values containing a `SourceRecord` and its structured contribution
+observations. `openalex.search` is ordinary lexical discovery;
 `openalex.semantic` is natural-language semantic discovery and is the preferred product-safe
 semantic candidate currently being evaluated for Research Atlas. Semantic Scholar relevance
 search remains an optional/internal comparator, and its relevance and bulk searches remain
@@ -81,18 +82,25 @@ reports retain them for review rather than silently dropping approved logical in
 
 ## Contribution observations
 
-The current adapters normalize provider author names into `SourceRecord.authors`; those strings
-remain bibliographic/display metadata and are not Contributor identity. Future structured mapping
-can capture contribution observations before detail is flattened and retain their role, meaningful
-provider ordering, original provider, and provider-native contributor evidence after exact Source
-merging. Displayed-name equality must not collapse observations.
+Provider adapters continue to normalize author names into `SourceRecord.authors` as compatibility
+bibliographic/display metadata. They now also capture structured contribution evidence before
+provider detail is flattened:
 
-OpenAlex authorships can supply display names, provider-native Author records, and ORCID when
-available. Semantic Scholar authors can supply display names and provider-native Author records.
-Crossref creator metadata can supply structured names and ORCID. Zotero creator metadata includes
-bibliographically relevant creator names and explicit creator roles. Current adapters primarily
-flatten authors and do not yet preserve every role or identity item; these architecture
-opportunities require no new API calls.
+- OpenAlex creates author observations with source-specific byline names where supplied,
+  provider-native Author IDs, and the resolved Author object's primary ORCID where supplied.
+  OpenAlex `raw_orcid` is not promoted into trusted `ContributorIdentifier` evidence.
+- Semantic Scholar creates author observations with provider-native author IDs.
+- Crossref creates author observations and preserves supplied ORCID evidence; current Crossref
+  author metadata does not supply a provider-native contributor record ID.
+- Zotero creates observations for every usable creator and preserves creator roles such as author,
+  editor, and translator; item keys identify Sources, not contributors.
+
+`ContributionObservation` is provider evidence and is not a durable `Contributor`. Provider
+mapping and discovery neither create nor resolve Contributors. Exact Source reconciliation remaps
+each observation from its provider candidate to the final Atlas `source_id` while preserving the
+observation ID, role, position, provider evidence, identifiers, kind, and retrieval time. It never
+collapses observations by displayed name, including observations from duplicate or merged Source
+candidates.
 [ADR 0005](adr/0005-contribution-and-contributor-identity.md) defines the Contributor identity and
 resolution contract.
 

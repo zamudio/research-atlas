@@ -6,8 +6,10 @@ from types import TracebackType
 
 import pytest
 
-from research_atlas.application.ports.literature_source import LiteratureQuery
-from research_atlas.domain.studies import SourceRecord
+from research_atlas.application.contributor_identity import observed_contribution
+from research_atlas.application.ports.literature_source import LiteratureQuery, LiteratureRecord
+from research_atlas.application.source_identity import identified_source
+from research_atlas.domain.studies import SourceProvenance
 from research_atlas.infrastructure.config import ProviderSettings
 
 
@@ -18,7 +20,7 @@ class FakeSource:
     def __init__(self, *_args: object, **_kwargs: object) -> None:
         pass
 
-    async def search(self, _query: LiteratureQuery) -> tuple[SourceRecord, ...]:
+    async def search(self, _query: LiteratureQuery) -> tuple[LiteratureRecord, ...]:
         return ()
 
 
@@ -86,7 +88,7 @@ def test_crossref_dry_run_avoids_s2_guard_and_preserves_request(
         def __init__(self, mailto: str | None = None) -> None:
             assert mailto == "researcher@example.test"
 
-        async def search(self, query: LiteratureQuery) -> tuple[SourceRecord, ...]:
+        async def search(self, query: LiteratureQuery) -> tuple[LiteratureRecord, ...]:
             assert query == LiteratureQuery(" exact Crossref query ", limit=3)
             return ()
 
@@ -119,6 +121,7 @@ def test_crossref_dry_run_avoids_s2_guard_and_preserves_request(
         "sources",
         "normalized_source_count",
         "cross_provider_merge_count",
+        "contribution_observations",
     }
 
 
@@ -166,6 +169,62 @@ def test_openalex_only_dry_run_does_not_acquire_s2_guard(fake_sources: None) -> 
     )
 
     assert acquisitions == 0
+
+
+def test_dry_run_serializes_structured_contribution_observations(
+    fake_sources: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from research_atlas.cli import dry_run
+
+    class StructuredOpenAlex(FakeOpenAlexSource):
+        async def search(self, _query: LiteratureQuery) -> tuple[LiteratureRecord, ...]:
+            source = identified_source(
+                title="Structured result",
+                authors=("Observed Author",),
+                year=2024,
+                source_type="article",
+                provenance=(SourceProvenance("openalex", "W1"),),
+            )
+            observation = observed_contribution(
+                source_id=source.source_id,
+                display_name="Observed Author",
+                role="author",
+                provider="openalex",
+                provider_record_id="A1",
+                provider_position=1,
+                observed_contributor_kind="person",
+            )
+            return (LiteratureRecord(source, (observation,)),)
+
+    monkeypatch.setattr(dry_run, "OpenAlexLiteratureSource", StructuredOpenAlex)
+
+    payload = json.loads(
+        asyncio.run(
+            dry_run.run_dry_run(
+                "structured",
+                limit=1,
+                settings=ProviderSettings(),
+            )
+        )
+    )
+
+    assert payload["contribution_observations"] == [
+        {
+            "contribution_observation_id": payload["contribution_observations"][0][
+                "contribution_observation_id"
+            ],
+            "source_id": payload["sources"][0]["source_id"],
+            "display_name": "Observed Author",
+            "role": "author",
+            "provider": "openalex",
+            "provider_record_id": "A1",
+            "provider_position": 1,
+            "external_identifiers": [],
+            "observed_contributor_kind": "person",
+            "retrieved_at": None,
+        }
+    ]
 
 
 def test_lexical_and_semantic_openalex_are_distinct_metadata_only_cli_operations(
@@ -216,6 +275,7 @@ def test_lexical_and_semantic_openalex_are_distinct_metadata_only_cli_operations
         "sources",
         "normalized_source_count",
         "cross_provider_merge_count",
+        "contribution_observations",
     }
 
 

@@ -9,9 +9,10 @@ from typing import cast
 
 import httpx
 
-from research_atlas.application.ports.literature_source import LiteratureQuery
+from research_atlas.application.contributor_identity import observed_contribution
+from research_atlas.application.ports.literature_source import LiteratureQuery, LiteratureRecord
 from research_atlas.application.source_identity import identified_source
-from research_atlas.domain.studies import ExternalIdentifier, SourceProvenance, SourceRecord
+from research_atlas.domain.studies import ExternalIdentifier, SourceProvenance
 from research_atlas.infrastructure.providers._http import (
     AttemptObserver,
     Sleep,
@@ -110,7 +111,7 @@ class _SemanticScholarLiteratureSource:
         self._attempt_observer = attempt_observer
         self._attempt_clock = attempt_clock
 
-    async def search(self, query: LiteratureQuery) -> tuple[SourceRecord, ...]:
+    async def search(self, query: LiteratureQuery) -> tuple[LiteratureRecord, ...]:
         if query.limit < 1:
             return ()
         if self._client is not None:
@@ -120,7 +121,7 @@ class _SemanticScholarLiteratureSource:
 
     async def _search(
         self, client: httpx.AsyncClient, query: LiteratureQuery
-    ) -> tuple[SourceRecord, ...]:
+    ) -> tuple[LiteratureRecord, ...]:
         raise NotImplementedError
 
     async def _get(
@@ -149,8 +150,9 @@ class _SemanticScholarLiteratureSource:
         )
 
     @staticmethod
-    def _map_paper(paper: Mapping[str, object]) -> SourceRecord:
+    def _map_paper(paper: Mapping[str, object]) -> LiteratureRecord:
         paper_id = str(paper.get("paperId") or "")
+        retrieved_at = datetime.now(UTC)
         identifiers = [ExternalIdentifier("semanticscholar", paper_id)]
         external_ids = paper.get("externalIds")
         if isinstance(external_ids, Mapping):
@@ -170,15 +172,25 @@ class _SemanticScholarLiteratureSource:
                 if isinstance(value, (str, int)) and str(value):
                     identifiers.append(ExternalIdentifier(namespace, str(value)))
         authors: list[str] = []
+        usable_authors: list[tuple[int, str, str | None]] = []
         raw_authors = paper.get("authors")
         if isinstance(raw_authors, list):
-            for author in cast(list[object], raw_authors):
+            for position, author in enumerate(cast(list[object], raw_authors), start=1):
                 author_mapping: Mapping[str, object] = (
                     cast(Mapping[str, object], author) if isinstance(author, Mapping) else {}
                 )
                 name = author_mapping.get("name")
-                if isinstance(name, str) and name:
-                    authors.append(name)
+                display_name = name.strip() if isinstance(name, str) else ""
+                if not display_name:
+                    continue
+                authors.append(display_name)
+                raw_author_id = author_mapping.get("authorId")
+                author_id = (
+                    raw_author_id.strip()
+                    if isinstance(raw_author_id, str) and raw_author_id.strip()
+                    else None
+                )
+                usable_authors.append((position, display_name, author_id))
         publication_types = paper.get("publicationTypes")
         if isinstance(publication_types, list) and publication_types:
             source_type = str(cast(list[object], publication_types)[0])
@@ -189,14 +201,30 @@ class _SemanticScholarLiteratureSource:
         raw_year = paper.get("year")
         year = raw_year if isinstance(raw_year, int) else None
         url = paper.get("url")
-        return identified_source(
+        source = identified_source(
             title=str(paper.get("title") or "Untitled source"),
             authors=authors,
             year=year,
             source_type=source_type,
-            provenance=(SourceProvenance("semantic_scholar", paper_id, datetime.now(UTC)),),
+            provenance=(SourceProvenance("semantic_scholar", paper_id, retrieved_at),),
             identifiers=identifiers,
             source_url=url if isinstance(url, str) else None,
+        )
+        return LiteratureRecord(
+            source,
+            tuple(
+                observed_contribution(
+                    source_id=source.source_id,
+                    display_name=display_name,
+                    role="author",
+                    provider="semantic_scholar",
+                    provider_record_id=author_id,
+                    provider_position=position,
+                    observed_contributor_kind="person",
+                    retrieved_at=retrieved_at,
+                )
+                for position, display_name, author_id in usable_authors
+            ),
         )
 
 
@@ -207,7 +235,7 @@ class SemanticScholarRelevanceSearch(_SemanticScholarLiteratureSource):
 
     async def _search(
         self, client: httpx.AsyncClient, query: LiteratureQuery
-    ) -> tuple[SourceRecord, ...]:
+    ) -> tuple[LiteratureRecord, ...]:
         if reserved := {parameter.name for parameter in query.parameters} & {
             "query",
             "limit",
@@ -245,7 +273,7 @@ class SemanticScholarBulkSearch(_SemanticScholarLiteratureSource):
 
     async def _search(
         self, client: httpx.AsyncClient, query: LiteratureQuery
-    ) -> tuple[SourceRecord, ...]:
+    ) -> tuple[LiteratureRecord, ...]:
         params: dict[str, str | int] = {"query": query.query, "fields": self._fields}
         if reserved := {parameter.name for parameter in query.parameters} & {
             "query",
@@ -255,7 +283,7 @@ class SemanticScholarBulkSearch(_SemanticScholarLiteratureSource):
             raise ValueError(
                 f"Semantic Scholar bulk adapter manages reserved parameters: {sorted(reserved)}"
             )
-        records: list[SourceRecord] = []
+        records: list[LiteratureRecord] = []
         seen_tokens: set[str] = set()
         while len(records) < query.limit:
             request_params = httpx.QueryParams(params)

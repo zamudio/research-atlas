@@ -6,9 +6,11 @@ from typing import cast
 
 import httpx
 
-from research_atlas.application.ports.literature_source import LiteratureQuery
+from research_atlas.application.contributor_identity import observed_contribution
+from research_atlas.application.ports.literature_source import LiteratureQuery, LiteratureRecord
 from research_atlas.application.source_identity import identified_source, normalize_doi
-from research_atlas.domain.studies import ExternalIdentifier, SourceProvenance, SourceRecord
+from research_atlas.domain.contributors import ContributorIdentifier
+from research_atlas.domain.studies import ExternalIdentifier, SourceProvenance
 from research_atlas.infrastructure.providers._http import get_with_retries
 
 
@@ -52,7 +54,7 @@ class CrossrefWorksSearch:
         self._mailto = _text(mailto)
         self._client = client
 
-    async def search(self, query: LiteratureQuery) -> tuple[SourceRecord, ...]:
+    async def search(self, query: LiteratureQuery) -> tuple[LiteratureRecord, ...]:
         if reserved := {parameter.name for parameter in query.parameters} & self._reserved:
             raise ValueError(f"Crossref adapter manages reserved parameters: {sorted(reserved)}")
         if query.limit < 1:
@@ -64,7 +66,7 @@ class CrossrefWorksSearch:
 
     async def _search(
         self, client: httpx.AsyncClient, query: LiteratureQuery
-    ) -> tuple[SourceRecord, ...]:
+    ) -> tuple[LiteratureRecord, ...]:
         page_size = min(query.limit, self._page_size)
         requires_cursor = query.limit > page_size
         if requires_cursor and any(
@@ -91,7 +93,7 @@ class CrossrefWorksSearch:
             if parameter.name != "filter":
                 params = params.add(parameter.name, parameter.value)
 
-        records: list[SourceRecord] = []
+        records: list[LiteratureRecord] = []
         cursor = "*" if requires_cursor else None
         while len(records) < query.limit:
             request_params = params.add("cursor", cursor) if cursor is not None else params
@@ -120,29 +122,54 @@ class CrossrefWorksSearch:
         return tuple(records)
 
     @staticmethod
-    def _map_work(work: Mapping[str, object]) -> SourceRecord:
+    def _map_work(work: Mapping[str, object]) -> LiteratureRecord:
         doi = normalize_doi(_text(work.get("DOI")))
         if not doi:
             raise ValueError("Crossref work requires a DOI for exact source matching")
+        retrieved_at = datetime.now(UTC)
         raw_titles = work.get("title")
         titles = cast(list[object], raw_titles) if isinstance(raw_titles, list) else []
         title = next((_text(item) for item in titles if _text(item)), "")
         authors: list[str] = []
+        usable_authors: list[tuple[int, str, str, tuple[ContributorIdentifier, ...]]] = []
         raw_authors = work.get("author")
         if isinstance(raw_authors, list):
-            for raw in cast(list[object], raw_authors):
+            for position, raw in enumerate(cast(list[object], raw_authors), start=1):
                 author = _mapping(raw)
+                given = _text(author.get("given"))
+                family = _text(author.get("family"))
                 name = _text(author.get("name")) or " ".join(
-                    part for field in ("given", "family") if (part := _text(author.get(field)))
+                    part for part in (given, family) if part
                 )
                 if name:
                     authors.append(name)
-        return identified_source(
+                    orcid = _text(author.get("ORCID"))
+                    identifiers = (ContributorIdentifier("orcid", orcid),) if orcid else ()
+                    usable_authors.append(
+                        (position, name, "person" if given or family else "unknown", identifiers)
+                    )
+        source = identified_source(
             title=title,
             authors=authors,
             year=_publication_year(work),
             source_type=_text(work.get("type")) or "unknown",
-            provenance=(SourceProvenance("crossref", doi, datetime.now(UTC)),),
+            provenance=(SourceProvenance("crossref", doi, retrieved_at),),
             identifiers=(ExternalIdentifier("doi", doi),),
             source_url=_text(work.get("URL")) or None,
+        )
+        return LiteratureRecord(
+            source,
+            tuple(
+                observed_contribution(
+                    source_id=source.source_id,
+                    display_name=display_name,
+                    role="author",
+                    provider="crossref",
+                    provider_position=position,
+                    external_identifiers=identifiers,
+                    observed_contributor_kind=contributor_kind,
+                    retrieved_at=retrieved_at,
+                )
+                for position, display_name, contributor_kind, identifiers in usable_authors
+            ),
         )

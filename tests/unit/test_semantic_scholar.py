@@ -13,10 +13,10 @@ from research_atlas.application.discovery import (
 )
 from research_atlas.application.ports.literature_source import (
     LiteratureQuery,
+    LiteratureRecord,
     LiteratureSearchRequest,
 )
 from research_atlas.domain.execution import SearchParameter
-from research_atlas.domain.studies import SourceRecord
 from research_atlas.infrastructure.providers import semantic_scholar
 from research_atlas.infrastructure.providers._http import RequestAttemptEvent
 from research_atlas.infrastructure.providers.semantic_scholar import (
@@ -81,7 +81,7 @@ def test_semantic_scholar_maps_mocked_paper() -> None:
                             "PubMed": "99",
                         },
                         "title": "A secondary result",
-                        "authors": [{"name": "Casey Researcher"}],
+                        "authors": [{"authorId": "s2-author-1", "name": "Casey Researcher"}],
                         "year": 2021,
                         "url": "https://www.semanticscholar.org/paper/abc123",
                         "publicationTypes": ["JournalArticle"],
@@ -106,7 +106,8 @@ def test_semantic_scholar_maps_mocked_paper() -> None:
 
     records = asyncio.run(run_search())
 
-    record = records[0]
+    literature_record = records[0]
+    record = literature_record.source
     assert record.title == "A secondary result"
     assert record.authors == ("Casey Researcher",)
     assert record.source_type == "journalarticle"
@@ -116,6 +117,24 @@ def test_semantic_scholar_maps_mocked_paper() -> None:
         ("pmid", "99"),
         ("semanticscholar", "abc123"),
     }
+    assert len(literature_record.contribution_observations) == 1
+    observation = literature_record.contribution_observations[0]
+    assert (
+        observation.display_name,
+        observation.role,
+        observation.provider,
+        observation.provider_record_id,
+        observation.provider_position,
+        observation.observed_contributor_kind,
+    ) == (
+        "Casey Researcher",
+        "author",
+        "semantic_scholar",
+        "s2-author-1",
+        1,
+        "person",
+    )
+    assert record.provider_provenance[0].retrieved_at == observation.retrieved_at
 
 
 def test_bulk_search_uses_boolean_endpoint_and_stops_at_limit_across_pages() -> None:
@@ -126,7 +145,7 @@ def test_bulk_search_uses_boolean_endpoint_and_stops_at_limit_across_pages() -> 
             "paperId": f"s2-{index}",
             "externalIds": {"DOI": f"10.1000/{index}"},
             "title": f"Bulk result {index}",
-            "authors": [{"name": "A. Researcher"}],
+            "authors": [{"authorId": f"author-{index}", "name": "A. Researcher"}],
             "year": 2020 + index,
             "url": f"https://www.semanticscholar.org/paper/s2-{index}",
             "publicationTypes": ["JournalArticle"],
@@ -142,7 +161,7 @@ def test_bulk_search_uses_boolean_endpoint_and_stops_at_limit_across_pages() -> 
         assert request.url.params["token"] == "next"
         return httpx.Response(200, json={"data": [paper(3), paper(4)]})
 
-    async def run_search() -> tuple[SourceRecord, ...]:
+    async def run_search() -> tuple[LiteratureRecord, ...]:
         clock = FakeMonotonicClock()
         async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
             return await SemanticScholarBulkSearch(
@@ -153,13 +172,13 @@ def test_bulk_search_uses_boolean_endpoint_and_stops_at_limit_across_pages() -> 
     records = asyncio.run(run_search())
 
     assert len(requests) == 2
-    assert [record.title for record in records] == [
+    assert [record.source.title for record in records] == [
         "Bulk result 1",
         "Bulk result 2",
         "Bulk result 3",
     ]
     assert all(
-        {item.provider for item in record.provider_provenance} == {"semantic_scholar"}
+        {item.provider for item in record.source.provider_provenance} == {"semantic_scholar"}
         for record in records
     )
 

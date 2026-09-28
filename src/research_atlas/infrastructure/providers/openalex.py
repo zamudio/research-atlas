@@ -9,9 +9,11 @@ from typing import ClassVar, cast
 
 import httpx
 
-from research_atlas.application.ports.literature_source import LiteratureQuery
+from research_atlas.application.contributor_identity import observed_contribution
+from research_atlas.application.ports.literature_source import LiteratureQuery, LiteratureRecord
 from research_atlas.application.source_identity import identified_source
-from research_atlas.domain.studies import ExternalIdentifier, SourceProvenance, SourceRecord
+from research_atlas.domain.contributors import ContributorIdentifier
+from research_atlas.domain.studies import ExternalIdentifier, SourceProvenance
 from research_atlas.infrastructure.providers._http import Sleep, get_with_retries
 
 OPENALEX_SEMANTIC_MINIMUM_INTERVAL_SECONDS = 1.1
@@ -82,7 +84,7 @@ class OpenAlexLiteratureSource:
         self._api_key = api_key
         self._client = client
 
-    async def search(self, query: LiteratureQuery) -> tuple[SourceRecord, ...]:
+    async def search(self, query: LiteratureQuery) -> tuple[LiteratureRecord, ...]:
         if query.limit < 1:
             return ()
         if self._client is not None:
@@ -92,7 +94,7 @@ class OpenAlexLiteratureSource:
 
     async def _search(
         self, client: httpx.AsyncClient, query: LiteratureQuery
-    ) -> tuple[SourceRecord, ...]:
+    ) -> tuple[LiteratureRecord, ...]:
         params: dict[str, str | int] = {
             "search": query.query,
             "per_page": min(query.limit, 100),
@@ -102,7 +104,7 @@ class OpenAlexLiteratureSource:
         if reserved := {parameter.name for parameter in query.parameters} & params.keys():
             raise ValueError(f"OpenAlex adapter manages reserved parameters: {sorted(reserved)}")
         headers = {"Authorization": f"Bearer {self._api_key}"} if self._api_key else None
-        records: list[SourceRecord] = []
+        records: list[LiteratureRecord] = []
         while len(records) < query.limit:
             request_params = httpx.QueryParams(params)
             for parameter in query.parameters:
@@ -134,8 +136,9 @@ class OpenAlexLiteratureSource:
         return tuple(records)
 
     @staticmethod
-    def _map_work(work: Mapping[str, object]) -> SourceRecord:
+    def _map_work(work: Mapping[str, object]) -> LiteratureRecord:
         work_id = str(work.get("id") or "").rsplit("/", maxsplit=1)[-1]
+        retrieved_at = datetime.now(UTC)
         identifiers = [ExternalIdentifier("openalex", work_id)]
         doi = work.get("doi")
         if isinstance(doi, str) and doi:
@@ -153,9 +156,12 @@ class OpenAlexLiteratureSource:
                     identifiers.append(ExternalIdentifier(namespace, str(value)))
 
         authors: list[str] = []
+        usable_authorships: list[
+            tuple[int, str, str | None, tuple[ContributorIdentifier, ...]]
+        ] = []
         authorships = work.get("authorships")
         if isinstance(authorships, list):
-            for authorship in cast(list[object], authorships):
+            for position, authorship in enumerate(cast(list[object], authorships), start=1):
                 if isinstance(authorship, Mapping):
                     authorship_mapping = cast(Mapping[str, object], authorship)
                     author = authorship_mapping.get("author")
@@ -163,8 +169,31 @@ class OpenAlexLiteratureSource:
                         cast(Mapping[str, object], author) if isinstance(author, Mapping) else {}
                     )
                     name = author_mapping.get("display_name")
-                    if isinstance(name, str) and name:
-                        authors.append(name)
+                    author_display_name = name.strip() if isinstance(name, str) else ""
+                    if author_display_name:
+                        authors.append(author_display_name)
+                    raw_author_name = authorship_mapping.get("raw_author_name")
+                    observed_name = (
+                        raw_author_name.strip() if isinstance(raw_author_name, str) else ""
+                    ) or author_display_name
+                    if not observed_name:
+                        continue
+                    raw_author_id = author_mapping.get("id")
+                    author_id = (
+                        raw_author_id.strip().rstrip("/").rsplit("/", maxsplit=1)[-1]
+                        if isinstance(raw_author_id, str) and raw_author_id.strip()
+                        else None
+                    )
+                    author_id = author_id or None
+                    raw_orcid = author_mapping.get("orcid")
+                    contributor_identifiers = (
+                        (ContributorIdentifier("orcid", raw_orcid.strip()),)
+                        if isinstance(raw_orcid, str) and raw_orcid.strip()
+                        else ()
+                    )
+                    usable_authorships.append(
+                        (position, observed_name, author_id, contributor_identifiers)
+                    )
 
         location = work.get("primary_location")
         location_mapping: Mapping[str, object] = (
@@ -179,14 +208,31 @@ class OpenAlexLiteratureSource:
                 year = int(publication_date[:4])
             except ValueError:
                 pass
-        return identified_source(
+        source = identified_source(
             title=str(work.get("title") or "Untitled source"),
             authors=authors,
             year=year,
             source_type=str(work.get("type") or "unknown"),
-            provenance=(SourceProvenance("openalex", work_id, datetime.now(UTC)),),
+            provenance=(SourceProvenance("openalex", work_id, retrieved_at),),
             identifiers=identifiers,
             source_url=landing_url if isinstance(landing_url, str) else None,
+        )
+        return LiteratureRecord(
+            source,
+            tuple(
+                observed_contribution(
+                    source_id=source.source_id,
+                    display_name=display_name,
+                    role="author",
+                    provider="openalex",
+                    provider_record_id=author_id,
+                    provider_position=position,
+                    external_identifiers=contributor_identifiers,
+                    observed_contributor_kind="person",
+                    retrieved_at=retrieved_at,
+                )
+                for position, display_name, author_id, contributor_identifiers in usable_authorships
+            ),
         )
 
 
@@ -218,7 +264,7 @@ class OpenAlexSemanticSearch(OpenAlexLiteratureSource):
         self._request_coordinator = request_coordinator or _DEFAULT_SEMANTIC_REQUEST_COORDINATOR
         self._retry_sleep = retry_sleep
 
-    async def search(self, query: LiteratureQuery) -> tuple[SourceRecord, ...]:
+    async def search(self, query: LiteratureQuery) -> tuple[LiteratureRecord, ...]:
         if query.limit > self._maximum_results:
             raise ValueError(
                 f"OpenAlex semantic search supports at most {self._maximum_results} results"
@@ -232,7 +278,7 @@ class OpenAlexSemanticSearch(OpenAlexLiteratureSource):
 
     async def _search(
         self, client: httpx.AsyncClient, query: LiteratureQuery
-    ) -> tuple[SourceRecord, ...]:
+    ) -> tuple[LiteratureRecord, ...]:
         reserved = {parameter.name for parameter in query.parameters} & self._reserved_parameters
         if reserved:
             raise ValueError(
