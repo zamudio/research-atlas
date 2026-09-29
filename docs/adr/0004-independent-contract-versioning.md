@@ -2,7 +2,10 @@
 
 ## Status
 
-Accepted. This ADR records the existing versioning contract.
+Superseded by the [lean v1 architecture intervention](../architecture.md), following the
+independent architecture audit. The original decision below is retained as historical rationale,
+not a current implementation requirement. Execution/provenance distinctions survive, while
+formal approval, contract coupling, and durable contributor identity do not.
 
 ## Context
 

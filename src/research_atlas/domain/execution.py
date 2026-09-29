@@ -1,4 +1,4 @@
-"""Immutable research execution and screening records."""
+"""Actual research execution and simple run-specific screening records."""
 
 from dataclasses import dataclass
 from datetime import datetime
@@ -18,11 +18,10 @@ class SearchParameter:
 
 @dataclass(frozen=True, slots=True)
 class SearchExecution:
-    """One logical execution of a stable search specification."""
+    """One actual logical search, independent of any prior plan."""
 
     search_execution_id: str
     run_id: str
-    search_spec_id: str
     provider_id: str
     operation_id: str
     exact_query: str
@@ -41,7 +40,6 @@ class SearchExecution:
             (
                 self.search_execution_id,
                 self.run_id,
-                self.search_spec_id,
                 self.provider_id,
                 self.operation_id,
                 self.exact_query,
@@ -81,34 +79,19 @@ class SourceDiscovery:
 
 @dataclass(frozen=True, slots=True)
 class ScreeningDecision:
-    """Append-only publication- or study-level screening decision."""
+    """Run-specific source or study eligibility with an explicit reason."""
 
     decision_id: str
     run_id: str
     source_id: UUID
-    stage: str
     decision: Literal["include", "exclude", "uncertain", "defer", "duplicate"]
-    reason_codes: tuple[str, ...]
     record_provenance: RecordProvenance
+    reason_codes: tuple[str, ...] = ()
     study_id: UUID | None = None
     rationale: str | None = None
-    supersedes_decision_id: str | None = None
 
     def __post_init__(self) -> None:
-        if not self.decision_id or not self.run_id or not self.stage:
-            raise ValueError("screening decision identities and stage must be non-empty")
+        if not self.decision_id or not self.run_id:
+            raise ValueError("screening decision identities must be non-empty")
         if any(not reason_code for reason_code in self.reason_codes):
             raise ValueError("screening reason_codes must be non-empty strings")
-
-
-def current_screening_decisions(
-    decisions: tuple[ScreeningDecision, ...],
-) -> tuple[ScreeningDecision, ...]:
-    """Return decisions not superseded by another append-only decision."""
-
-    superseded = {
-        decision.supersedes_decision_id
-        for decision in decisions
-        if decision.supersedes_decision_id is not None
-    }
-    return tuple(decision for decision in decisions if decision.decision_id not in superseded)

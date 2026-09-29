@@ -1,50 +1,44 @@
 # Research Atlas
 
-Research Atlas is reusable infrastructure for evidence-backed research. It keeps what was
-planned, what actually ran, what the evidence supports, and how evidence is applied separate and
-traceable. It is designed for humans, agents, and products without binding the evidence model to
-one provider or downstream application.
+Research Atlas is being built to research a question, discover publications, extract study
+findings, and serve evidence-backed insights with useful outputs. It remains reusable across
+research domains; AI Tutor is one downstream use case.
 
-## Four concerns
+## Implemented today
 
-1. **Definition:** a validated, fingerprinted `RunDefinition` states approved intent.
-2. **Execution:** immutable run, search, discovery, and screening records state what happened.
-3. **Evidence:** sources, studies, findings, constructs, and assessments state what is supported
-   and where uncertainty remains.
-4. **Application:** optional candidates and implications describe how assessed evidence may inform
-   a consumer without rewriting the evidence.
+The metadata-only dry-run searches OpenAlex and optionally Crossref, reconciles exact Source
+identities, and reports provider outcomes and attributable publication metadata. It does not
+create a research run, obtain paper content, extract findings, or synthesize evidence.
+
+The small retained model distinguishes a research request, actual run/search records, Sources,
+Studies, and Findings. Source identity is Atlas-owned; provider records and external identifiers
+are matching evidence. Bibliographic credits remain provider metadata without contributor identity.
+
+## Product direction
 
 ```text
-ProjectProfile + optional EvidenceApplicationProfile
-                         |
-                  RunDefinition
-                         |
-                    ResearchRun
-                         |
-       SearchExecution -> SourceDiscovery -> Screening
-                         |
-       Source -> Study -> Finding -> EvidenceAssessment
-                                             |
-                                      optional application
+Research question -> research run -> scholarly discovery -> Source
+    -> paper content -> Studies and Findings -> evidence-linked Insights -> useful outputs
 ```
 
-## Developer quickstart
+Paper-content acquisition, validated extraction, persistence, Insight synthesis, and frontend
+access are future stages. Stage 1 removes speculative architecture without implementing them.
+The Learning Foundations request (Run 001) remains unexecuted.
 
-Requires Python 3.14.7 and [uv](https://docs.astral.sh/uv/).
+## Development
+
+Requires Python 3.14.7 and uv. After dependency changes, refresh the lockfile before locked setup.
 
 ```shell
 uv sync --locked
-uv run pytest
+uv run pytest -q
 uv run ruff check .
 uv run ruff format --check .
 uv run pyright
 ```
 
-The metadata-only dry run is documented in the [CLI guide](docs/cli.md). It does not create a
-research run or invoke an LLM. The first real research run remains planned and unexecuted.
-
-- [Documentation home](docs/index.md)
-- [Architecture and boundaries](docs/architecture.md)
+- [Architecture](docs/architecture.md)
 - [Research lifecycle](docs/research-lifecycle.md)
-- [Providers and safety](docs/providers.md)
-- [CLI guide](docs/cli.md)
+- [Provider behavior and limitations](docs/providers.md)
+- [Dry-run CLI](docs/cli.md)
+- [Documentation index](docs/index.md)

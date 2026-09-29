@@ -14,7 +14,7 @@ from research_atlas.application.ports.literature_source import (
     LiteratureRecord,
     LiteratureSearchRequest,
 )
-from research_atlas.domain.contributors import ContributorIdentifier
+from research_atlas.domain.contributors import BibliographicCredit
 from research_atlas.domain.execution import SearchParameter
 from research_atlas.infrastructure.providers import openalex
 from research_atlas.infrastructure.providers.openalex import (
@@ -119,7 +119,7 @@ def test_openalex_maps_mocked_work_and_retries_rate_limit() -> None:
     literature_record = records[0]
     record = literature_record.source
     assert record.title == "Example result"
-    assert record.authors == ("Ada Author", "Ben Writer")
+    assert record.authors == ("A. Author", "Ben Writer")
     assert record.year == 2022
     assert record.source_type == "article"
     assert record.source_url == "https://example.test/article"
@@ -127,31 +127,17 @@ def test_openalex_maps_mocked_work_and_retries_rate_limit() -> None:
         (item.namespace, item.value) for item in record.external_identifiers
     }
     assert ("pmid", "42") in {(item.namespace, item.value) for item in record.external_identifiers}
-    first, second = literature_record.contribution_observations
-    assert (
-        first.display_name,
-        first.role,
-        first.provider,
-        first.provider_record_id,
-        first.provider_position,
-        first.external_identifiers,
-        first.observed_contributor_kind,
-    ) == (
-        "A. Author",
-        "author",
-        "openalex",
-        "A123",
-        1,
-        (ContributorIdentifier("orcid", "0000-0002-1825-0097"),),
-        "person",
+    assert literature_record.credits == (
+        BibliographicCredit(
+            "A. Author",
+            provider_record_id="A123",
+            external_identifiers=(("orcid", "https://orcid.org/0000-0002-1825-0097"),),
+        ),
+        BibliographicCredit("Ben Writer"),
     )
-    assert ContributorIdentifier("orcid", "0000-0002-1694-233X") not in (first.external_identifiers)
-    assert second.display_name == "Ben Writer"
-    assert second.provider_record_id is None
-    assert second.external_identifiers == ()
-    assert second.provider_position == 2
-    assert record.provider_provenance[0].retrieved_at == first.retrieved_at == second.retrieved_at
-    assert first.retrieved_at is not None and first.retrieved_at.utcoffset() is not None
+    provenance = record.provider_provenance[0]
+    assert provenance.provider_record_id == "W123"
+    assert provenance.retrieved_at is not None and provenance.retrieved_at.utcoffset() is not None
 
 
 def test_authenticated_openalex_uses_bearer_header_without_key_in_request_data() -> None:

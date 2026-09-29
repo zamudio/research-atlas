@@ -1,4 +1,4 @@
-"""Source, study, intervention, and research-run domain records."""
+"""Source, study, and research-run domain records."""
 
 from dataclasses import dataclass
 from datetime import datetime
@@ -6,7 +6,6 @@ from typing import Literal
 from uuid import UUID
 
 from research_atlas.domain.provenance import RecordProvenance
-from research_atlas.domain.versioning import ProtocolReference
 
 
 @dataclass(frozen=True, slots=True)
@@ -56,46 +55,30 @@ class StudyRecord:
 
 
 @dataclass(frozen=True, slots=True)
-class InterventionRecord:
-    """A manipulation or treatment studied in a particular context."""
-
-    intervention_id: UUID
-    source_study_id: UUID
-    description: str
-    comparator: str | None
-    target_population: str
-    context: str
-    outcomes_studied: tuple[str, ...]
-    record_provenance: RecordProvenance
-    notes: str | None = None
-
-
-@dataclass(frozen=True, slots=True)
 class ResearchRun:
-    """One execution instance of a validated, approved run definition."""
+    """A research effort retaining user intent separately from planned operations.
+
+    SearchExecution records own the exact searches that actually ran. These are
+    data records only; orchestration and durable progress are later stages.
+    """
 
     run_id: str
     project_id: str
-    definition_schema_version: str
-    definition_fingerprint: str
-    definition_reference: str
-    status: Literal["running", "completed", "failed", "cancelled"]
-    protocol_references: tuple[ProtocolReference, ...]
-    taxonomy_reference: str
-    taxonomy_version: str
-    started_at: datetime
+    request: str
+    status: Literal["queued", "running", "completed", "failed", "cancelled"]
+    created_at: datetime
+    research_questions: tuple[str, ...] = ()
+    constraints: tuple[str, ...] = ()
+    plan: tuple[str, ...] = ()
+    expected_outputs: tuple[str, ...] = ()
+    started_at: datetime | None = None
     completed_at: datetime | None = None
     notes: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
-        if len(self.definition_fingerprint) != 64 or any(
-            character not in "0123456789abcdef" for character in self.definition_fingerprint
-        ):
-            raise ValueError("definition_fingerprint must be a lowercase SHA-256 hex digest")
+        if not self.run_id.strip() or not self.project_id.strip() or not self.request.strip():
+            raise ValueError("run identity, project identity, and request must not be blank")
+        if self.status == "running" and self.started_at is None:
+            raise ValueError("running research runs require started_at")
         if self.status in {"completed", "failed", "cancelled"} and self.completed_at is None:
             raise ValueError("terminal research runs require completed_at")
-        protocol_keys = {
-            (reference.protocol_id, reference.phase) for reference in self.protocol_references
-        }
-        if len(protocol_keys) != len(self.protocol_references):
-            raise ValueError("ResearchRun protocol_id and phase pairs must be unique")

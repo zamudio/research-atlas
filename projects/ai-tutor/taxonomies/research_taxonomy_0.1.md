@@ -1,4 +1,4 @@
-# Research Taxonomy v0.1
+# Optional research inquiry taxonomy
 
 ## Purpose
 
@@ -36,8 +36,7 @@ literature has clean boundaries.
   equitable access without inferring diagnoses?
 - **Measurement validity:** Do measures justify the interpretations and decisions made from them?
 
-## Versioning
+## Use
 
-The taxonomy version used by every research run and export must be recorded. Categories may split,
-merge, or be renamed after early runs expose gaps. Such changes require a new version and migration
-notes; older records retain the taxonomy version under which they were created.
+These categories are optional project guidance. They neither define Atlas entities nor require a
+run or output to adopt a taxonomy version. Revise them as research exposes better questions.

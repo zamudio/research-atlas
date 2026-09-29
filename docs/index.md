@@ -1,32 +1,17 @@
 # Research Atlas documentation
 
-Research Atlas is provenance-first evidence infrastructure with explicit boundaries between
-research intent, execution, evidence, and optional evidence application.
+Research Atlas separates research intent, actual execution, reported findings, and downstream
+interpretation. The current executable workflow is metadata discovery.
 
-## Guides
+- [Architecture](architecture.md): lean v1 boundaries and Stage 1 limits.
+- [Lifecycle](research-lifecycle.md): user request through future evidence-backed output.
+- [Identifiers](architecture/naming-and-identifiers.md): Source, provider, and execution identity.
+- [Providers](providers.md): OpenAlex and optional Crossref behavior.
+- [CLI](cli.md): metadata-only developer diagnostic.
+- [ADR register](adr/README.md): retained decisions and explicitly superseded history.
+- [Project examples](../projects/README.md): optional project and request data.
 
-- [Architecture](architecture.md) explains durable component and ownership boundaries.
-- [Architecture decisions](adr/README.md) records accepted durable decisions and their status.
-- [Naming and identifier glossary](architecture/naming-and-identifiers.md) defines canonical terms.
-- [Research lifecycle](research-lifecycle.md) follows a run from approved definition through
-  evidence and optional application.
-- [Providers](providers.md) explains adapter roles, source identity, and operational safety.
-- [CLI](cli.md) documents dry-run usage, complex Semantic Scholar queries, and diagnostics.
-
-For installation and a compact project overview, start with the [repository README](../README.md).
-
-## Current contracts
-
-- Package version: 0.6.0
-- Run-definition schema: 0.2
-- Records schema: 0.6
-- Export-bundle schema: 0.1
-- Implemented OpenAlex operations: lexical works search and semantic search
-- Implemented Semantic Scholar operations: optional relevance and bulk search
-- Implemented Crossref operation: experimental bibliographic works search
-- Reference-library adapter: Zotero, read-only
-- Run 001: planned and unexecuted
-
-Package releases, run definitions, research records, and export bundles are independently
-versioned contracts. A future 1.0 release is intended to mark a clean first public-facing
-API/product contract; this release does not otherwise redesign versioning around that milestone.
+The package retains software versioning. Internal request and record classes are evolving
+pre-v1 implementation details, without independently versioned aggregate/export contracts.
+No database, extraction engine, synthesis service, or frontend is implemented. Run 001 remains
+unexecuted.

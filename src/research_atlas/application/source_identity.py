@@ -20,10 +20,6 @@ _NAMESPACE_ALIASES = {
     "pubmedcentral": "pmcid",
     "arxiv_id": "arxiv",
     "openalex_id": "openalex",
-    "semantic_scholar": "semanticscholar",
-    "semantic_scholar_corpus": "corpusid",
-    "paperid": "semanticscholar",
-    "corpus_id": "corpusid",
     "mag_id": "mag",
     "dblp_id": "dblp",
 }
@@ -34,14 +30,12 @@ TRUSTED_EXACT_IDENTIFIER_NAMESPACES = frozenset(
     {
         "acl",
         "arxiv",
-        "corpusid",
         "dblp",
         "doi",
         "mag",
         "openalex",
         "pmcid",
         "pmid",
-        "semanticscholar",
     }
 )
 _CONFLICTING_IDENTIFIER_NAMESPACES = frozenset({"arxiv", "doi", "pmcid", "pmid"})
@@ -217,34 +211,13 @@ def _merge_component(records: tuple[SourceRecord, ...]) -> SourceRecord:
     provenance = _merge_provenance(
         item for record in records for item in record.provider_provenance
     )
-    author_lists = [
-        tuple(author.strip() for author in record.authors if author.strip())
-        for record in records
-        if record.authors
-    ]
-    base_authors = (
-        sorted(
-            author_lists,
-            key=lambda values: (-len(values), tuple(value.casefold() for value in values)),
-        )[0]
-        if author_lists
-        else ()
-    )
-    seen_authors = {author.casefold() for author in base_authors}
-    additional_authors = sorted(
-        {
-            author.strip()
-            for record in records
-            for author in record.authors
-            if author.strip() and author.strip().casefold() not in seen_authors
-        },
-        key=lambda value: (value.casefold(), value),
-    )
+    # Choose a whole observed byline. Unioning names can invent extra authors.
+    authors = next((record.authors for record in records if record.authors), ())
     years = [record.year for record in records if record.year is not None]
     return SourceRecord(
         source_id=records[0].source_id,
         title=_preferred_text((record.title for record in records), "") or "",
-        authors=(*base_authors, *additional_authors),
+        authors=authors,
         year=min(years) if years else None,
         source_type=_preferred_text((record.source_type for record in records), "unknown")
         or "unknown",

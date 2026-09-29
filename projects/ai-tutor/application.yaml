@@ -1,4 +1,4 @@
-schema_version: "0.1"
+# Optional downstream output guidance; not consumed by the evidence core.
 project_id: "ai-tutor"
 application_name: "AI Tutor"
 destinations:
@@ -10,4 +10,4 @@ destinations:
 constraints:
   - "Keep observations distinct from inferences."
   - "Do not infer unobservable traits or encode unsupported learning styles."
-  - "Evidence application must not mutate or rewrite an EvidenceAssessment."
+  - "Retain evidence citations and uncertainty in recommendations."

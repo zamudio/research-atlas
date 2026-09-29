@@ -1,4 +1,4 @@
-"""Experimental Crossref bibliographic discovery adapter."""
+"""Optional Crossref bibliographic discovery adapter."""
 
 from collections.abc import Mapping
 from datetime import UTC, datetime
@@ -6,10 +6,9 @@ from typing import cast
 
 import httpx
 
-from research_atlas.application.contributor_identity import observed_contribution
 from research_atlas.application.ports.literature_source import LiteratureQuery, LiteratureRecord
 from research_atlas.application.source_identity import identified_source, normalize_doi
-from research_atlas.domain.contributors import ContributorIdentifier
+from research_atlas.domain.contributors import BibliographicCredit
 from research_atlas.domain.studies import ExternalIdentifier, SourceProvenance
 from research_atlas.infrastructure.providers._http import get_with_retries
 
@@ -101,7 +100,7 @@ class CrossrefWorksSearch:
                 client,
                 f"{self.base_url}/works",
                 params=request_params,
-                headers={"User-Agent": "ResearchAtlas/Crossref-feasibility"},
+                headers={"User-Agent": "ResearchAtlas"},
             )
             payload: object = response.json()
             message = _mapping(_mapping(payload).get("message"))
@@ -130,46 +129,31 @@ class CrossrefWorksSearch:
         raw_titles = work.get("title")
         titles = cast(list[object], raw_titles) if isinstance(raw_titles, list) else []
         title = next((_text(item) for item in titles if _text(item)), "")
-        authors: list[str] = []
-        usable_authors: list[tuple[int, str, str, tuple[ContributorIdentifier, ...]]] = []
+        credits: list[BibliographicCredit] = []
         raw_authors = work.get("author")
         if isinstance(raw_authors, list):
-            for position, raw in enumerate(cast(list[object], raw_authors), start=1):
+            for raw in cast(list[object], raw_authors):
                 author = _mapping(raw)
-                given = _text(author.get("given"))
-                family = _text(author.get("family"))
                 name = _text(author.get("name")) or " ".join(
-                    part for part in (given, family) if part
+                    part
+                    for part in (_text(author.get("given")), _text(author.get("family")))
+                    if part
                 )
                 if name:
-                    authors.append(name)
                     orcid = _text(author.get("ORCID"))
-                    identifiers = (ContributorIdentifier("orcid", orcid),) if orcid else ()
-                    usable_authors.append(
-                        (position, name, "person" if given or family else "unknown", identifiers)
+                    credits.append(
+                        BibliographicCredit(
+                            display_name=name,
+                            external_identifiers=(("orcid", orcid),) if orcid else (),
+                        )
                     )
         source = identified_source(
             title=title,
-            authors=authors,
+            authors=(credit.display_name for credit in credits),
             year=_publication_year(work),
             source_type=_text(work.get("type")) or "unknown",
             provenance=(SourceProvenance("crossref", doi, retrieved_at),),
             identifiers=(ExternalIdentifier("doi", doi),),
             source_url=_text(work.get("URL")) or None,
         )
-        return LiteratureRecord(
-            source,
-            tuple(
-                observed_contribution(
-                    source_id=source.source_id,
-                    display_name=display_name,
-                    role="author",
-                    provider="crossref",
-                    provider_position=position,
-                    external_identifiers=identifiers,
-                    observed_contributor_kind=contributor_kind,
-                    retrieved_at=retrieved_at,
-                )
-                for position, display_name, contributor_kind, identifiers in usable_authors
-            ),
-        )
+        return LiteratureRecord(source, tuple(credits))

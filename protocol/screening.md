@@ -1,9 +1,9 @@
-# Screening protocol 0.1
+# Screening guidance
 
-Screening decisions are append-only records tied to a research run, source, stage, and optionally
-one study within the source. Use the small core decision vocabulary while keeping project/run
-reason codes as extensible strings.
+Record run-specific source eligibility as include, exclude, uncertain, defer, or duplicate, with
+an explanation where material. A Study-level decision must refer to a Study from the chosen Source.
+Unknown eligibility must not silently become inclusion or exclusion.
 
-A correction creates a new decision with `supersedes_decision_id`; it does not overwrite history.
-The current state is the set of decisions not superseded by another valid decision. Record the
-reviewer, method, timing, and review state through `RecordProvenance`.
+Retain the run, Source, optional Study, reason, and review/creation context. A prescribed set of
+stages, formal plan approval, or supersession graph is not required. Screening execution and
+persistent correction behavior remain future workflow work.

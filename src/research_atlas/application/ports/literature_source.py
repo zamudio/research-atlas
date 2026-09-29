@@ -1,9 +1,9 @@
-"""Port for discovering and retrieving literature from external providers."""
+"""Provider-neutral boundary for literature metadata discovery."""
 
 from dataclasses import dataclass
-from typing import Protocol, Self
+from typing import Protocol
 
-from research_atlas.domain.contributors import ContributionObservation
+from research_atlas.domain.contributors import BibliographicCredit
 from research_atlas.domain.execution import SearchParameter
 from research_atlas.domain.studies import SourceRecord
 
@@ -19,7 +19,7 @@ class LiteratureSourceError(RuntimeError):
 
 @dataclass(frozen=True, slots=True)
 class LiteratureQuery:
-    """Exact text and result limit for one explicitly selected search operation."""
+    """Exact text, limit, and parameters for one explicitly selected operation."""
 
     query: str
     limit: int = 8
@@ -28,19 +28,15 @@ class LiteratureQuery:
 
 @dataclass(frozen=True, slots=True)
 class LiteratureRecord:
-    """One provider source candidate and its attached contribution evidence."""
+    """One whole provider publication observation and its ordered credits.
+
+    Source metadata and credits stay together even after Source reconciliation.
+    The Source's provider provenance identifies the originating publication record;
+    credit-level provider IDs, when present, describe provider contributor records.
+    """
 
     source: SourceRecord
-    contribution_observations: tuple[ContributionObservation, ...] = ()
-
-    def __post_init__(self) -> None:
-        if any(
-            observation.source_id != self.source.source_id
-            for observation in self.contribution_observations
-        ):
-            raise ValueError(
-                "every contribution observation must reference the LiteratureRecord source_id"
-            )
+    credits: tuple[BibliographicCredit, ...] = ()
 
 
 class LiteratureSource(Protocol):
@@ -55,39 +51,9 @@ class LiteratureSource(Protocol):
     async def search(self, query: LiteratureQuery) -> tuple[LiteratureRecord, ...]: ...
 
 
-class SearchSpecification(Protocol):
-    """Fields required to map an execution-ready logical search without schema coupling."""
-
-    execution_ready: bool
-    provider_id: str | None
-    operation_id: str | None
-    exact_query: str | None
-    requested_limit: int | None
-    parameters: tuple[SearchParameter, ...]
-
-
 @dataclass(frozen=True, slots=True)
 class LiteratureSearchRequest:
-    """Pair one provider operation with the exact query text intended for its semantics."""
+    """Pair a provider operation with the exact query intended for its semantics."""
 
     source: LiteratureSource
     query: LiteratureQuery
-
-    @classmethod
-    def from_search_spec(cls, source: LiteratureSource, spec: SearchSpecification) -> Self:
-        """Preserve one execution-ready SearchSpec as a provider request."""
-
-        if (
-            not spec.execution_ready
-            or spec.provider_id is None
-            or spec.operation_id is None
-            or spec.exact_query is None
-            or spec.requested_limit is None
-        ):
-            raise ValueError("a literature search request requires an execution-ready SearchSpec")
-        if (source.provider_id, source.operation_id) != (spec.provider_id, spec.operation_id):
-            raise ValueError("literature source must match the SearchSpec provider and operation")
-        return cls(
-            source,
-            LiteratureQuery(spec.exact_query, spec.requested_limit, spec.parameters),
-        )

@@ -120,8 +120,8 @@ def test_cross_provider_candidates_with_same_doi_merge() -> None:
         identifiers=(ExternalIdentifier("doi", "10.1/shared"),),
     )
     semantic = _source(
-        "semantic_scholar",
-        "S1",
+        "crossref",
+        "10.1/shared",
         identifiers=(ExternalIdentifier("DOI", "10.1/SHARED"),),
     )
 
@@ -130,7 +130,7 @@ def test_cross_provider_candidates_with_same_doi_merge() -> None:
     assert len(merged) == 1
     assert {item.provider for item in merged[0].provider_provenance} == {
         "openalex",
-        "semantic_scholar",
+        "crossref",
     }
 
 
@@ -143,9 +143,9 @@ def test_transitive_exact_identity_connectivity_merges_one_component() -> None:
     bridge = _source(
         "openalex",
         "W1",
-        additional_provenance=(SourceProvenance("semantic_scholar", "S1"),),
+        additional_provenance=(SourceProvenance("crossref", "10.1/shared"),),
     )
-    third = _source("semantic_scholar", "S1")
+    third = _source("crossref", "10.1/shared")
 
     resolution = resolve_exact_sources((first, bridge, third))
 
@@ -160,8 +160,8 @@ def test_merge_preserves_first_seen_candidate_source_id() -> None:
         identifiers=(ExternalIdentifier("doi", "10.1/shared"),),
     )
     second = _source(
-        "semantic_scholar",
-        "S1",
+        "crossref",
+        "10.1/shared",
         identifiers=(ExternalIdentifier("doi", "10.1/shared"),),
     )
 
@@ -227,8 +227,6 @@ def test_unknown_identifier_namespace_is_not_automatic_match_authority() -> None
         "openalex",
         "pmcid",
         "pmid",
-        "semantic_scholar_corpus",
-        "semanticscholar",
     ),
 )
 def test_unique_identifier_namespaces_emitted_by_providers_are_exact_keys(
@@ -240,10 +238,9 @@ def test_unique_identifier_namespaces_emitted_by_providers_are_exact_keys(
         identifiers=(ExternalIdentifier(namespace, "record-1"),),
     )
 
-    expected_namespace = "corpusid" if namespace == "semantic_scholar_corpus" else namespace
     expected_value = "RECORD-1" if namespace == "pmcid" else "record-1"
     assert ExactSourceKey(
-        "external_identifier", expected_namespace, expected_value
+        "external_identifier", namespace, expected_value
     ) in exact_source_match_keys(source)
 
 
@@ -264,3 +261,35 @@ def test_titles_authors_and_years_without_exact_keys_do_not_merge() -> None:
     )
 
     assert len(merge_sources((first, second))) == 2
+
+
+def test_merging_never_combines_different_provider_bylines() -> None:
+    first = _source(
+        "openalex",
+        "W1",
+        authors=("A. Smith", "B. Jones"),
+        identifiers=(ExternalIdentifier("doi", "10.1/shared"),),
+    )
+    second = _source(
+        "crossref",
+        "10.1/shared",
+        authors=("Alice Smith", "Bob Jones"),
+        identifiers=(ExternalIdentifier("doi", "10.1/shared"),),
+    )
+
+    assert merge_sources((first, second))[0].authors == first.authors
+    assert merge_sources((second, first))[0].authors == second.authors
+
+
+def test_empty_byline_can_use_one_complete_provider_byline() -> None:
+    first = _source(
+        "openalex", "W1", authors=(), identifiers=(ExternalIdentifier("doi", "10.1/shared"),)
+    )
+    second = _source(
+        "crossref",
+        "10.1/shared",
+        authors=("Same Name", "Same Name"),
+        identifiers=(ExternalIdentifier("doi", "10.1/shared"),),
+    )
+
+    assert merge_sources((first, second))[0].authors == second.authors

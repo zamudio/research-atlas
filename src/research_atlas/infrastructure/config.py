@@ -1,4 +1,4 @@
-"""Environment-backed configuration for provider adapters."""
+"""Environment-backed configuration for supported provider adapters."""
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -8,7 +8,3 @@ class ProviderSettings(BaseSettings):
 
     openalex_api_key: str | None = None
     crossref_mailto: str | None = None
-    semantic_scholar_api_key: str | None = None
-    zotero_library_id: str | None = None
-    zotero_library_type: str = "user"
-    zotero_api_key: str | None = None

@@ -1,67 +1,43 @@
 # Research lifecycle
 
-## 1. Define and approve
+## Ask and plan
 
-`ProjectProfile` describes domain-neutral project goals and constraints. An optional
-`EvidenceApplicationProfile` describes a consumer, allowed destinations, and application
-constraints. Neither is execution state.
+A ResearchRequest needs only a nonblank question. Subquestions, constraints, plan notes, and
+expected outputs are optional. Loading request YAML does not approve or execute research.
+ProjectProfile supplies project identity and optional research context.
 
-A `RunDefinition` fixes questions, scope, logical search specifications, screening plans, stopping
-rules, protocol and taxonomy references, and expected outputs. Planned definitions may omit exact
-queries. Planned SearchSpec identities may evolve while exact operation-specific searches are
-formulated; they become stable at approval. An approved definition requires every `SearchSpec` to
-be execution-ready with a non-blank provider, operation, exact query, and an explicit positive
-requested limit. Query contents are preserved exactly.
+ResearchRun retains the original request and planning information with project ownership,
+lifecycle state, and timestamps. Intent can differ from execution; an evolving plan must not
+rewrite what actually happened.
 
-## 2. Execute
+## Discover
 
-`ResearchRun` identifies the approved definition through its reference, schema version, and
-fingerprint. `SearchExecution` records each logical approved search once, including exact query,
-provider-neutral `(name, value)` parameters, requested limit, timing, outcome, result count, and
-safe failure metadata. Provider requests, pages, and retries are not copied into this record.
+The implemented DiscoverSources use case executes explicit provider operations and preserves
+exact query text, parameters, limits, outcomes, and temporary memberships. It retains provider
+publication observations alongside reconciled Sources. One provider failure does not erase another
+provider's results. A successful empty response and an explicit provider failure are distinct.
 
-`SourceDiscovery` connects a successful search execution to a normalized `SourceRecord`. A source
-may be found by multiple searches or providers. `SourceDiscovery.provider_record_id`, when present,
-identifies the provider-native record encountered by that search execution. `SourceProvenance`
-separately records where normalized source metadata came from; its `provider_record_id` need not
-name the discovery provider or contain the same value.
+The CLI is metadata-only. It creates neither ResearchRun nor SearchExecution nor SourceDiscovery.
+For future durable execution, SearchExecution records actual inputs/outcomes and SourceDiscovery
+links Sources to those executions. Search indices are temporary in-memory coordinates.
 
-Application discovery preserves a temporary membership for each search/source pair before an
-execution layer creates `SourceDiscovery`. The membership retains the zero-based requested-search
-index, the provider's one-based result position, the final exact-merged source ID, and an
-unambiguous provider-local record ID when available. Repeated appearances within one search keep
-the earliest position; appearances across searches remain separate. Dry-run serialization remains
-metadata-only and does not expose execution-domain records. Before persistence, the zero-based
-`search_index` must be resolved to the actual durable `search_execution_id`; the index must never
-become a durable foreign key. Bibliographic contribution is captured first as provider-attributable
-observation evidence; a Contributor link is optional and explicit, and names alone cannot establish
-it. See [ADR 0005](adr/0005-contribution-and-contributor-identity.md).
+## Screen and extract: future workflow
 
-## 3. Screen and assess evidence
+ScreeningDecision represents run-specific eligibility, including uncertainty, rationale, and an
+optional Study subject. It has no supersession graph. Source and Study remain distinct: a paper
+can contain several studies. FindingRecord retains reported results, uncertainty, limitations,
+and subgroup notes without global measurement or intervention identities.
 
-`ScreeningDecision` is append-only. A correction creates a new decision linked by
-`supersedes_decision_id`; current state is derived rather than overwritten. Study-level decisions
-must point to a study belonging to the selected source. At export, each decision's stage and reason
-codes must be declared by the approved screening plan.
+The repository does not yet retrieve paper content or extract these records. Missing content,
+ambiguous extraction, and absent measurements must never be silently filled in. Future validated
+extractions must reference the exact document and passage supporting each result.
 
-Evidence proceeds from source to study, measurements or interventions, findings, and finally an
-`EvidenceAssessment`. Assessments keep contradictory and null findings, uncertainty, measurement
-limits, and generalizability visible. Revised assessments use `supersedes_evidence_id`; links must
-remain acyclic and within the same creating run, while semantic equivalence remains a review
-responsibility.
+## Synthesize and use: future workflow
 
-## 4. Apply evidence when appropriate
+Cross-study synthesis must distinguish reported Findings from Atlas Insights, preserve contrary
+and null evidence, and explain the evidence selected. Existing assessment data alone does not
+establish truth or enforce complete evidence chains.
 
-Evidence application is optional and downstream. `ApplicationCandidate` and
-`DecisionImplication` retain links to the supporting assessments and their own provenance. They may
-interpret evidence for a consumer decision but cannot modify, relabel, or replace an
-`EvidenceAssessment`.
-
-## 5. Export a portable snapshot
-
-An `ExportBundle` contains a manifest, records, and each contributing run's validated definition
-snapshot. Manifest contributing run IDs and bundled `ResearchRun` IDs must have exactly the same
-membership, while only the run-definition snapshots inherit manifest ordering. Bundle schema and
-records schema are identified independently. Validation recomputes fingerprints and compares every
-execution to its approved search spec, including exact generic parameters and requested limit. A
-serialized and restored bundle therefore retains both intent and execution integrity.
+Useful outputs will render selected Insights for a purpose while retaining citations and
+qualifications. No application promotion ontology or export framework is required to begin this
+work. Finalized evidence must remain reproducible when future correction behavior is implemented.

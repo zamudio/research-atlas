@@ -1,11 +1,13 @@
-# Project-owned definitions
+# Optional project data
 
-Each directory here contains project data consumed by Research Atlas workflows. These files are
-outside the `research_atlas` package, and core code must not import them or branch on their values.
+Project directories contain reusable research context and unexecuted request examples. Core code
+must not import these files or branch on a particular project ID.
 
-A project directory may contain a generic `project.yaml`, an optional consumer-specific
-`application.yaml`, versioned vocabulary or taxonomies, and validated `RunDefinition` YAML under
-`runs/`. A planned definition is not an executed `ResearchRun`: it has no timestamps, search
-results, screening decisions, or extracted records. Exact queries may remain intentionally absent
-while the definition is planned. SearchSpec identities become stable when the definition is
-approved.
+`project.yaml` supplies identity and optional objectives, scope, and constraints. Files under
+`runs/` can contain a ResearchRequest with a question and optional subquestions/plan notes; loading
+one does not create or execute a ResearchRun. Actual searches are recorded separately when execution
+is implemented.
+
+AI Tutor's `application.yaml` is optional downstream output guidance, not a validated core profile
+or a required evidence lifecycle. Its taxonomy is an inquiry aid. Neither governs core contracts.
+The Learning Foundations request (Run 001) remains unexecuted.

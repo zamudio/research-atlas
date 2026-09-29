@@ -1,46 +1,24 @@
-# Evidence Assessment v0.1
+# Evidence assessment guidance
 
-## Principle
+An assessment evaluates an explicit claim across reported Findings. It is not a copy of authors'
+interpretations, a publication count, or a universal numeric evidence score.
 
-Evidence assessment is our documented evaluation of an explicit claim or body of evidence, not a
-copy of paper authors' claims. The claim may concern a construct, intervention, relationship,
-modality, interface effect, or another cross-study question; an assessment may link relevant
-constructs but is not required to belong to one. It must not collapse scientific support into a
-universal numeric score.
-Use explicit qualitative levels with a rationale for each relevant dimension.
+Reason about relevant dimensions, with explanations rather than a mandatory ontology:
 
-## Dimensions
+- study design and fitness for causal claims;
+- independent replication and overlapping study populations/publications;
+- consistency, contradictory findings, null results, and publication bias;
+- measurement validity and uncertainty in estimates;
+- population coverage and transfer across settings, tasks, and timescales.
 
-Assess, where applicable:
+Reviews and meta-analyses can be useful but require attention to eligibility, heterogeneity,
+analytic choices, and overlap with primary evidence. Non-significance is not proof of no effect.
 
-- **Study design:** fitness of the design for the claim, comparison, and causal language used.
-- **Replication:** independent replications, preregistered confirmations, or repeated failures.
-- **Consistency:** agreement in direction and interpretation across relevant results.
-- **Population coverage:** representation of populations to which a consumer might generalize.
-- **Measurement validity:** evidence that operations support the intended interpretation.
-- **Effect uncertainty:** precision, plausible magnitude, model dependence, and sensitivity.
-- **Contradictory and null evidence:** relevant failures, nulls, boundary conditions, and publication
-  bias concerns.
-- **External validity:** transfer across settings, tasks, durations, modalities, and implementation
-  conditions.
+Future Insights must identify the Findings being used, explain their relationship to the claim,
+and preserve uncertainty and generalizability limits. Findings must lead back to Studies and exact
+source content. Insufficient evidence must remain insufficient. Existing assessment dataclasses
+alone do not establish that a claim is supported.
 
-Suggested labels such as `insufficient`, `limited`, `moderate`, `strong`, `mixed`, or `not
-assessed` are descriptive aids. Every label requires a rationale; projects may extend the labels.
-
-Systematic reviews and meta-analyses generally receive greater synthesis weight because they can
-integrate evidence across studies. They are not automatically correct: eligibility decisions,
-study quality, heterogeneity, publication bias, construct mismatch, and analytic choices still
-require review.
-
-## Traceability
-
-Each assessment lists supporting, contradictory, and null findings, each of which retains its
-study and source link. The assessment's human-readable claim states exactly what those findings are
-being used to assess; optional construct links provide indexing and context rather than ownership.
-Uncertainty, limitations, and generalizability are first-class fields. A later assessment may
-link to an earlier one through `supersedes_evidence_id`; the earlier version and its source links
-remain reproducible. Supersession links must exist, cannot point to self, cannot form cycles or
-branches, and remain within the same creating research run. Whether two assessments address the
-same logical claim or body of evidence remains an explicit review responsibility rather than a
-text-equality rule. Later evidence application may reference an assessment, but must not mutate or
-rewrite it.
+Published results and citations must remain reproducible when later evidence changes conclusions.
+Correction behavior belongs with the implemented evidence workflow, without requiring a generic
+supersession graph now.

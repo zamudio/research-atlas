@@ -1,151 +1,40 @@
-schema_version: "0.2"
-records_schema_version: "0.6"
-definition_status: "planned"
-project_id: "ai-tutor"
-run_id: "learning-foundations-001"
-label: "Learning Foundations Landscape"
-output_label: "Learning Foundations Landscape v0.1"
-run_type: "landscape_mapping"
-purpose: >-
-  Map the strongest, most relevant bodies of evidence across human learning and instruction to
-  establish the evidence landscape, initial construct registry, major interventions and
-  moderators, contested areas, and prioritized research agenda for AI Tutor.
+# Run 001 remains UNEXECUTED. This file is research intent, not execution state.
+question: >-
+  What is well supported about human learning and effective instruction, and what should inform
+  the design of an adaptive AI tutor?
 research_questions:
-  - question_id: "RQ1"
-    text: >-
-      Which mechanisms, constructs, and phenomena are important to acquisition, retention,
-      transfer, and effective instruction?
-  - question_id: "RQ2"
-    text: >-
-      Which instructional strategies and interventions have reliable effects, and under which
-      conditions?
-  - question_id: "RQ3"
-    text: >-
-      How are learner states and processes operationalized and measured, and what limits their
-      interpretation?
-  - question_id: "RQ4"
-    text: >-
-      How are effects moderated by prior knowledge, expertise, age or development, task
-      difficulty, domain, modality, and setting?
-  - question_id: "RQ5"
-    text: >-
-      Which widely discussed claims are mixed, weak, contested, null, narrow, or contradicted?
-scope:
-  populations:
-    - "all human ages, with population and generalizability recorded"
-  domains:
-    - "human learning, instruction, assessment, cognition, motivation, and self-regulation"
-  source_types:
-    - "umbrella reviews"
-    - "systematic reviews and meta-analyses"
-    - "broad scholarly reviews"
-    - "measurement and methodological reviews"
-    - "landmark primary studies"
-  date_range: "Prefer syntheses from 2010 through 2026; include older foundational work when justified."
-  languages:
-    - "English"
-  notes:
-    - "Exclude non-human learning and machine-learning research without a human-learning question."
-    - "Exclude commercial or product opinion without empirical evidence."
-search_plan:
-  strategy: >-
-    Develop and approve multiple targeted, operation-appropriate query variants per landscape
-    family. These planned placeholders may be revised or replaced as exact provider-specific
-    searches are formulated. SearchSpec identities become stable when the definition is approved.
-  planned_sources:
-    - "OpenAlex"
-    - "Semantic Scholar"
-    - "manual cross-check in Elicit"
-    - "citation chaining"
-    - "Zotero canonical library"
-  search_specs:
-    - search_spec_id: "learning-memory-practice"
-      label: "Learning, memory, and practice"
-      query_intent: "Reviews and foundational studies on acquisition, retention, transfer, and practice."
-    - search_spec_id: "instruction-cognitive-load"
-      label: "Instruction and cognitive load"
-      query_intent: "Reviews of instructional design, worked examples, and cognitive load."
-    - search_spec_id: "feedback-assessment"
-      label: "Feedback and assessment"
-      query_intent: "Reviews of feedback, formative assessment, testing, and measurement."
-    - search_spec_id: "metacognition-self-regulation"
-      label: "Metacognition and self-regulation"
-      query_intent: "Reviews of metacognition, calibration, and self-regulated learning."
-    - search_spec_id: "errors-conceptual-change"
-      label: "Errors and conceptual change"
-      query_intent: "Reviews of misconceptions, errors, and conceptual change."
-    - search_spec_id: "motivation-engagement"
-      label: "Motivation and engagement"
-      query_intent: "Reviews connecting motivation or engagement to educational outcomes."
-    - search_spec_id: "moderators-learner-differences"
-      label: "Moderators and learner differences"
-      query_intent: "Reviews of evidence-backed moderators without learning-style assumptions."
-    - search_spec_id: "tutoring-dialogue"
-      label: "Tutoring and dialogue"
-      query_intent: "Reviews of human or intelligent tutoring and instructional dialogue."
-screening_plan:
-  stages:
-    - "discovery"
-    - "relevance"
-    - "evidence"
-    - "study-level eligibility where a publication contains multiple studies"
-  inclusion_criteria:
-    - "Addresses a research question within the declared human-learning scope."
-    - "Provides empirical evidence or a scholarly synthesis with traceable sources."
-  exclusion_criteria:
-    - "Non-human learning."
-    - "Machine-learning algorithms without a meaningful human-learning question."
-    - "Purely biological work without educational interpretation."
-    - "Duplicate publication or study."
-  reason_codes:
-    - "out_of_scope"
-    - "not_empirical_or_scholarly_synthesis"
-    - "duplicate"
-    - "insufficient_educational_relevance"
-stopping_rule:
-  rule_type: "saturation"
-  description: >-
-    Stop when successive targeted query variants and citation chaining produce materially no new
-    sources, constructs, interventions, moderators, or controversies; do not use an arbitrary
-    fixed-paper count.
-protocol_references:
-  - protocol_id: "extraction"
-    version: "0.3"
-    phase: "extraction"
-  - protocol_id: "screening"
-    version: "0.1"
-    phase: "screening"
-  - protocol_id: "evidence-assessment"
-    version: "0.1"
-    phase: "synthesis"
-taxonomy:
-  reference: "projects/ai-tutor/taxonomies/research_taxonomy_0.1.md"
-  version: "0.1"
-evidence_strategy:
-  priorities:
-    - "umbrella reviews"
-    - "systematic reviews and meta-analyses"
-    - "broad scholarly reviews"
-    - "measurement and methodological reviews"
-    - "landmark primary studies"
-    - "individual primary studies as needed"
-  strategy: >-
-    Separate reported findings from cross-study assessment; retain contradictions, null results,
-    measurement limits, moderators, and generalizability limits.
-expected_outputs:
-  - "search execution and discovery provenance"
-  - "screening decisions with reasons"
-  - "construct and measurement maps"
-  - "intervention and moderator maps"
-  - "findings and preliminary EvidenceAssessments"
-  - "contradiction, null, and controversy register"
-  - "unanswered questions and prioritized follow-up runs"
-  - "Learning Foundations Landscape v0.1"
-limitations:
   - >-
-    This is an internal structured landscape review, not a publication-grade systematic review,
-    and is not independently duplicated by multiple human reviewers.
-epistemic_only: true
-application_boundary: >-
-  This run ends at evidence synthesis. Any ApplicationCandidate or DecisionImplication is created
-  later under a separate evidence application process and cannot mutate an EvidenceAssessment.
+    Which mechanisms, constructs, and phenomena are important to acquisition, retention,
+    transfer, and effective instruction?
+  - >-
+    Which instructional strategies and interventions have reliable effects, and under which
+    conditions?
+  - >-
+    How are learner states and processes operationalized and measured, and what limits their
+    interpretation?
+  - >-
+    How are effects moderated by prior knowledge, expertise, age or development, task
+    difficulty, domain, modality, and setting?
+  - >-
+    Which widely discussed claims are mixed, weak, contested, null, narrow, or contradicted?
+constraints:
+  - "Cover human learners of all ages; record population and generalizability limits."
+  - "Focus on human learning and instruction; exclude unrelated machine-learning research."
+  - "Prefer useful English-language syntheses from 2010-2026; include older foundational work when justified."
+  - "Separate reported findings from synthesis; preserve contradictions, nulls, and uncertainty."
+  - "This is an internal landscape review, not a publication-grade systematic review."
+plan:
+  - "Investigate learning, memory, practice, retention, and transfer."
+  - "Investigate instructional design, worked examples, and cognitive load."
+  - "Investigate feedback, formative assessment, testing, and measurement."
+  - "Investigate metacognition, calibration, and self-regulated learning."
+  - "Investigate misconceptions, errors, and conceptual change."
+  - "Investigate motivation, engagement, and educational outcomes."
+  - "Investigate evidence-backed moderators without learning-style assumptions."
+  - "Investigate human or intelligent tutoring and instructional dialogue."
+  - "Use targeted, provider-appropriate queries and record what actually executes."
+  - "Prioritize relevant reviews and syntheses; examine primary studies where needed."
+expected_outputs:
+  - "A traceable summary of findings and their strength, limits, and disagreements."
+  - "Measurement and implementation considerations supported by the evidence."
+  - "Coverage limitations, unanswered questions, and priorities for follow-up research."

@@ -1,4 +1,8 @@
-"""Transparent qualitative evidence assessment."""
+"""Reported study findings and simple cross-finding assessment data.
+
+No extraction or synthesis service is implemented here. Scientific detail can
+later grow at validated extraction boundaries without global ontology identities.
+"""
 
 from dataclasses import dataclass
 from uuid import UUID
@@ -18,8 +22,6 @@ class FindingRecord:
     direction: str
     status: str
     record_provenance: RecordProvenance
-    linked_measurement_ids: tuple[UUID, ...] = ()
-    linked_intervention_ids: tuple[UUID, ...] = ()
     effect_estimate: str | None = None
     uncertainty: str | None = None
     moderator_and_subgroup_notes: tuple[str, ...] = ()
@@ -29,44 +31,18 @@ class FindingRecord:
 
 
 @dataclass(frozen=True, slots=True)
-class EvidenceDimension:
-    """One explicitly reasoned dimension of evidence quality."""
-
-    name: str
-    level: str
-    rationale: str
-
-
-@dataclass(frozen=True, slots=True)
 class EvidenceAssessment:
-    """Our assessment of a claim or evidence body, separate from author findings."""
+    """A claim-sized assessment referencing findings, not a synthesis engine.
+
+    Retained as simple data until the later Insight stage establishes its actual
+    boundary. This trusted record does not validate evidence existence or support.
+    """
 
     evidence_id: str
     claim: str
-    supporting_finding_ids: tuple[UUID, ...]
-    direction: str
-    summary: str
-    dimensions: tuple[EvidenceDimension, ...]
-    uncertainty_and_limitations: tuple[str, ...]
-    generalizability_notes: tuple[str, ...]
     record_provenance: RecordProvenance
-    linked_construct_ids: tuple[str, ...] = ()
+    supporting_finding_ids: tuple[UUID, ...] = ()
     contradictory_finding_ids: tuple[UUID, ...] = ()
     null_finding_ids: tuple[UUID, ...] = ()
-    assessor: str | None = None
-    supersedes_evidence_id: str | None = None
-
-
-def current_evidence_assessments(
-    assessments: tuple[EvidenceAssessment, ...],
-) -> tuple[EvidenceAssessment, ...]:
-    """Return assessments not superseded by another append-only assessment."""
-
-    superseded = {
-        assessment.supersedes_evidence_id
-        for assessment in assessments
-        if assessment.supersedes_evidence_id is not None
-    }
-    return tuple(
-        assessment for assessment in assessments if assessment.evidence_id not in superseded
-    )
+    uncertainty_and_limitations: tuple[str, ...] = ()
+    generalizability_notes: tuple[str, ...] = ()

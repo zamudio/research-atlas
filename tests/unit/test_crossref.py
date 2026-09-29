@@ -10,12 +10,11 @@ from research_atlas.application.ports.literature_source import (
     LiteratureRecord,
     LiteratureSearchRequest,
 )
-from research_atlas.domain.contributors import ContributorIdentifier
+from research_atlas.domain.contributors import BibliographicCredit
 from research_atlas.domain.execution import SearchParameter
 from research_atlas.domain.studies import ExternalIdentifier
 from research_atlas.infrastructure.providers.crossref import CrossrefWorksSearch
 from research_atlas.infrastructure.providers.openalex import OpenAlexLiteratureSource
-from research_atlas.infrastructure.providers.semantic_scholar import SemanticScholarRelevanceSearch
 
 
 def search(
@@ -45,7 +44,7 @@ def test_request_mapping_parameters_and_retry_after() -> None:
         assert request.url.params["filter"] == "type:journal-article,from-pub-date:2020"
         assert request.url.params["sort"] == "relevance"
         assert request.url.params["mailto"] == "researcher@example.test"
-        assert request.headers["user-agent"] == "ResearchAtlas/Crossref-feasibility"
+        assert request.headers["user-agent"] == "ResearchAtlas"
         assert "authorization" not in request.headers
         assert "DOI" in request.url.params["select"].split(",")
         if calls == 1:
@@ -102,32 +101,13 @@ def test_request_mapping_parameters_and_retry_after() -> None:
     provenance = record.provider_provenance[0]
     assert (provenance.provider, provenance.provider_record_id) == ("crossref", "10.1000/example")
     assert provenance.retrieved_at is not None and provenance.retrieved_at.utcoffset() is not None
-    assert [item.display_name for item in literature_record.contribution_observations] == [
-        "Ada Author",
-        "Study Group",
-        "Writer",
-    ]
-    first, second, third = literature_record.contribution_observations
-    assert (
-        first.role,
-        first.provider,
-        first.provider_record_id,
-        first.provider_position,
-        first.external_identifiers,
-        first.observed_contributor_kind,
-    ) == (
-        "author",
-        "crossref",
-        None,
-        1,
-        (ContributorIdentifier("orcid", "0000-0002-1825-0097"),),
-        "person",
+    assert literature_record.credits == (
+        BibliographicCredit(
+            "Ada Author", external_identifiers=(("orcid", "https://orcid.org/0000-0002-1825-0097"),)
+        ),
+        BibliographicCredit("Study Group"),
+        BibliographicCredit("Writer"),
     )
-    assert second.provider_position == 2
-    assert second.observed_contributor_kind == "unknown"
-    assert third.provider_position == 3
-    assert third.observed_contributor_kind == "person"
-    assert provenance.retrieved_at == first.retrieved_at == second.retrieved_at
 
 
 @pytest.mark.parametrize(
@@ -289,7 +269,7 @@ def test_invalid_response_fails_explicitly(payload: object) -> None:
         search(lambda _request: httpx.Response(200, json=payload))
 
 
-def test_discovery_merges_crossref_openalex_and_s2_by_exact_doi() -> None:
+def test_discovery_merges_crossref_and_openalex_by_exact_doi() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.host == "api.crossref.org":
             return httpx.Response(
@@ -315,18 +295,7 @@ def test_discovery_merges_crossref_openalex_and_s2_by_exact_doi() -> None:
                     ]
                 },
             )
-        assert request.url.host == "api.semanticscholar.org"
-        return httpx.Response(
-            200,
-            json={
-                "data": [
-                    {
-                        "paperId": "s2-1",
-                        "externalIds": {"DOI": "10.1000/Example"},
-                    }
-                ]
-            },
-        )
+        raise AssertionError("unexpected provider")
 
     async def run() -> None:
         async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
@@ -336,7 +305,6 @@ def test_discovery_merges_crossref_openalex_and_s2_by_exact_doi() -> None:
                     for source in (
                         CrossrefWorksSearch(client=client),
                         OpenAlexLiteratureSource(client=client),
-                        SemanticScholarRelevanceSearch(client=client),
                     )
                 ]
             ).execute()
@@ -345,8 +313,23 @@ def test_discovery_merges_crossref_openalex_and_s2_by_exact_doi() -> None:
         assert {p.provider for p in report.sources[0].provider_provenance} == {
             "crossref",
             "openalex",
-            "semantic_scholar",
         }
         assert serialize_report(report)["cross_provider_merge_count"] == 1
 
     asyncio.run(run())
+
+
+def test_unverified_credit_identifiers_do_not_block_source_mapping() -> None:
+    payload = {
+        "message": {
+            "items": [
+                {
+                    "DOI": "10.1000/example",
+                    "author": [{"name": "Study Group", "ORCID": "provider-supplied-invalid-orcid"}],
+                }
+            ]
+        }
+    }
+    record = search(lambda _request: httpx.Response(200, json=payload))[0]
+    assert record.credits[0].external_identifiers == (("orcid", "provider-supplied-invalid-orcid"),)
+    assert record.source.authors == ("Study Group",)

@@ -9,10 +9,9 @@ from typing import ClassVar, cast
 
 import httpx
 
-from research_atlas.application.contributor_identity import observed_contribution
 from research_atlas.application.ports.literature_source import LiteratureQuery, LiteratureRecord
 from research_atlas.application.source_identity import identified_source
-from research_atlas.domain.contributors import ContributorIdentifier
+from research_atlas.domain.contributors import BibliographicCredit
 from research_atlas.domain.studies import ExternalIdentifier, SourceProvenance
 from research_atlas.infrastructure.providers._http import Sleep, get_with_retries
 
@@ -155,45 +154,40 @@ class OpenAlexLiteratureSource:
                 if isinstance(value, (str, int)) and str(value):
                     identifiers.append(ExternalIdentifier(namespace, str(value)))
 
-        authors: list[str] = []
-        usable_authorships: list[
-            tuple[int, str, str | None, tuple[ContributorIdentifier, ...]]
-        ] = []
+        credits: list[BibliographicCredit] = []
         authorships = work.get("authorships")
         if isinstance(authorships, list):
-            for position, authorship in enumerate(cast(list[object], authorships), start=1):
-                if isinstance(authorship, Mapping):
-                    authorship_mapping = cast(Mapping[str, object], authorship)
-                    author = authorship_mapping.get("author")
-                    author_mapping: Mapping[str, object] = (
-                        cast(Mapping[str, object], author) if isinstance(author, Mapping) else {}
+            for authorship in cast(list[object], authorships):
+                if not isinstance(authorship, Mapping):
+                    continue
+                authorship_mapping = cast(Mapping[str, object], authorship)
+                author = authorship_mapping.get("author")
+                author_mapping: Mapping[str, object] = (
+                    cast(Mapping[str, object], author) if isinstance(author, Mapping) else {}
+                )
+                raw_name = authorship_mapping.get("raw_author_name")
+                name = author_mapping.get("display_name")
+                display_name = (raw_name.strip() if isinstance(raw_name, str) else "") or (
+                    name.strip() if isinstance(name, str) else ""
+                )
+                if not display_name:
+                    continue
+                raw_author_id = author_mapping.get("id")
+                author_id = (
+                    raw_author_id.strip().rstrip("/").rsplit("/", maxsplit=1)[-1]
+                    if isinstance(raw_author_id, str) and raw_author_id.strip()
+                    else None
+                )
+                orcid = author_mapping.get("orcid")
+                credits.append(
+                    BibliographicCredit(
+                        display_name=display_name,
+                        provider_record_id=author_id or None,
+                        external_identifiers=(("orcid", orcid.strip()),)
+                        if isinstance(orcid, str) and orcid.strip()
+                        else (),
                     )
-                    name = author_mapping.get("display_name")
-                    author_display_name = name.strip() if isinstance(name, str) else ""
-                    if author_display_name:
-                        authors.append(author_display_name)
-                    raw_author_name = authorship_mapping.get("raw_author_name")
-                    observed_name = (
-                        raw_author_name.strip() if isinstance(raw_author_name, str) else ""
-                    ) or author_display_name
-                    if not observed_name:
-                        continue
-                    raw_author_id = author_mapping.get("id")
-                    author_id = (
-                        raw_author_id.strip().rstrip("/").rsplit("/", maxsplit=1)[-1]
-                        if isinstance(raw_author_id, str) and raw_author_id.strip()
-                        else None
-                    )
-                    author_id = author_id or None
-                    raw_orcid = author_mapping.get("orcid")
-                    contributor_identifiers = (
-                        (ContributorIdentifier("orcid", raw_orcid.strip()),)
-                        if isinstance(raw_orcid, str) and raw_orcid.strip()
-                        else ()
-                    )
-                    usable_authorships.append(
-                        (position, observed_name, author_id, contributor_identifiers)
-                    )
+                )
 
         location = work.get("primary_location")
         location_mapping: Mapping[str, object] = (
@@ -210,30 +204,14 @@ class OpenAlexLiteratureSource:
                 pass
         source = identified_source(
             title=str(work.get("title") or "Untitled source"),
-            authors=authors,
+            authors=(credit.display_name for credit in credits),
             year=year,
             source_type=str(work.get("type") or "unknown"),
             provenance=(SourceProvenance("openalex", work_id, retrieved_at),),
             identifiers=identifiers,
             source_url=landing_url if isinstance(landing_url, str) else None,
         )
-        return LiteratureRecord(
-            source,
-            tuple(
-                observed_contribution(
-                    source_id=source.source_id,
-                    display_name=display_name,
-                    role="author",
-                    provider="openalex",
-                    provider_record_id=author_id,
-                    provider_position=position,
-                    external_identifiers=contributor_identifiers,
-                    observed_contributor_kind="person",
-                    retrieved_at=retrieved_at,
-                )
-                for position, display_name, author_id, contributor_identifiers in usable_authorships
-            ),
-        )
+        return LiteratureRecord(source, tuple(credits))
 
 
 class OpenAlexSemanticSearch(OpenAlexLiteratureSource):

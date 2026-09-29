@@ -2,8 +2,7 @@
 
 import asyncio
 from collections.abc import Sequence
-from dataclasses import dataclass, replace
-from typing import TypedDict
+from dataclasses import asdict, dataclass, replace
 from uuid import UUID
 
 from research_atlas.application.ports.literature_source import (
@@ -12,71 +11,8 @@ from research_atlas.application.ports.literature_source import (
     LiteratureSourceError,
 )
 from research_atlas.application.source_identity import resolve_exact_sources
-from research_atlas.domain.contributors import ContributionObservation
 from research_atlas.domain.execution import SearchParameter
 from research_atlas.domain.studies import SourceRecord
-
-
-class SerializedSource(TypedDict):
-    source_id: str
-    title: str
-    authors: list[str]
-    year: int | None
-    source_type: str
-    source_url: str | None
-    external_identifiers: dict[str, list[str]]
-    provider_provenance: list[dict[str, str | None]]
-    merged_across_providers: bool
-
-
-class SerializedProviderOutcome(TypedDict):
-    provider: str
-    operation: str
-    success: bool
-    raw_result_count: int | None
-    error_type: str | None
-    status_code: int | None
-    error_message: str | None
-
-
-class SerializedSearchParameter(TypedDict):
-    name: str
-    value: str
-
-
-class SerializedSearchSummary(TypedDict):
-    provider: str
-    operation: str
-    query: str
-    limit: int
-    parameters: list[SerializedSearchParameter]
-
-
-class SerializedContributorIdentifier(TypedDict):
-    namespace: str
-    value: str
-
-
-class SerializedContributionObservation(TypedDict):
-    contribution_observation_id: str
-    source_id: str
-    display_name: str
-    role: str
-    provider: str
-    provider_record_id: str | None
-    provider_position: int | None
-    external_identifiers: list[SerializedContributorIdentifier]
-    observed_contributor_kind: str | None
-    retrieved_at: str | None
-
-
-class SerializedDiscoveryReport(TypedDict):
-    searches: list[SerializedSearchSummary]
-    provider_outcomes: list[SerializedProviderOutcome]
-    normalized_source_count: int
-    cross_provider_merge_count: int
-    sources: list[SerializedSource]
-    contribution_observations: list[SerializedContributionObservation]
 
 
 @dataclass(frozen=True, slots=True)
@@ -121,7 +57,7 @@ class DiscoveryReport:
     sources: tuple[SourceRecord, ...]
     provider_outcomes: tuple[ProviderOutcome, ...]
     memberships: tuple[DiscoveryMembership, ...] = ()
-    contribution_observations: tuple[ContributionObservation, ...] = ()
+    metadata_observations: tuple[LiteratureRecord, ...] = ()
 
 
 class DiscoveryFailedError(RuntimeError):
@@ -174,10 +110,12 @@ class DiscoverSources:
                 )
             )
         resolution = resolve_exact_sources(record.source for record in discovered)
-        contribution_observations = tuple(
-            replace(observation, source_id=resolution.source_ids_by_input[input_index])
-            for input_index, record in enumerate(discovered)
-            for observation in record.contribution_observations
+        metadata_observations = tuple(
+            replace(
+                record,
+                source=replace(record.source, source_id=resolution.source_ids_by_input[index]),
+            )
+            for index, record in enumerate(discovered)
         )
         memberships: list[DiscoveryMembership] = []
         input_index = 0
@@ -204,7 +142,7 @@ class DiscoverSources:
             sources=resolution.sources,
             provider_outcomes=outcomes,
             memberships=tuple(memberships),
-            contribution_observations=contribution_observations,
+            metadata_observations=metadata_observations,
         )
 
     @staticmethod
@@ -258,7 +196,7 @@ def _provider_record_id(record: SourceRecord, provider: str) -> str | None:
     return next(iter(record_ids))
 
 
-def serialize_source(record: SourceRecord) -> SerializedSource:
+def serialize_source(record: SourceRecord) -> dict[str, object]:
     """Create stable, human-reviewable dry-run output without research-run records."""
 
     identifiers: dict[str, list[str]] = {}
@@ -285,73 +223,23 @@ def serialize_source(record: SourceRecord) -> SerializedSource:
     }
 
 
-def serialize_sources(records: Sequence[SourceRecord]) -> list[SerializedSource]:
-    return [serialize_source(record) for record in records]
-
-
-def serialize_contribution_observation(
-    observation: ContributionObservation,
-) -> SerializedContributionObservation:
-    """Create deterministic, JSON-friendly contribution evidence for dry-run review."""
-
-    identifiers = sorted(
-        observation.external_identifiers,
-        key=lambda identifier: (identifier.namespace, identifier.value),
-    )
-    return {
-        "contribution_observation_id": str(observation.contribution_observation_id),
-        "source_id": str(observation.source_id),
-        "display_name": observation.display_name,
-        "role": observation.role,
-        "provider": observation.provider,
-        "provider_record_id": observation.provider_record_id,
-        "provider_position": observation.provider_position,
-        "external_identifiers": [
-            {"namespace": identifier.namespace, "value": identifier.value}
-            for identifier in identifiers
-        ],
-        "observed_contributor_kind": observation.observed_contributor_kind,
-        "retrieved_at": observation.retrieved_at.isoformat() if observation.retrieved_at else None,
-    }
-
-
-def serialize_report(report: DiscoveryReport) -> SerializedDiscoveryReport:
-    """Serialize provider health and normalized sources for a dry-run review."""
+def serialize_report(report: DiscoveryReport) -> dict[str, object]:
+    """Serialize metadata and provider health for developer review, without a bundle."""
 
     return {
-        "searches": [
-            {
-                "provider": search.provider,
-                "operation": search.operation,
-                "query": search.query,
-                "limit": search.limit,
-                "parameters": [
-                    {"name": parameter.name, "value": parameter.value}
-                    for parameter in search.parameters
-                ],
-            }
-            for search in report.searches
-        ],
-        "provider_outcomes": [
-            {
-                "provider": outcome.provider,
-                "operation": outcome.operation,
-                "success": outcome.success,
-                "raw_result_count": outcome.raw_result_count,
-                "error_type": outcome.error_type,
-                "status_code": outcome.status_code,
-                "error_message": outcome.error_message,
-            }
-            for outcome in report.provider_outcomes
-        ],
+        "searches": [asdict(search) for search in report.searches],
+        "provider_outcomes": [asdict(outcome) for outcome in report.provider_outcomes],
         "normalized_source_count": len(report.sources),
         "cross_provider_merge_count": sum(
             len({item.provider for item in source.provider_provenance}) > 1
             for source in report.sources
         ),
-        "sources": serialize_sources(report.sources),
-        "contribution_observations": [
-            serialize_contribution_observation(observation)
-            for observation in report.contribution_observations
+        "sources": [serialize_source(source) for source in report.sources],
+        "metadata_observations": [
+            {
+                **serialize_source(record.source),
+                "credits": [asdict(credit) for credit in record.credits],
+            }
+            for record in report.metadata_observations
         ],
     }

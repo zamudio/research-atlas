@@ -40,5 +40,5 @@ record identity.
 - PostgreSQL tables, repositories, and migrations
 - transactional merging of already-stored source rows
 
-Contribution and contributor identity are governed separately by
-[ADR 0005](0005-contribution-and-contributor-identity.md).
+The [lean v1 intervention](../architecture.md) retains these Source identity decisions.
+Bibliographic credits remain provider metadata; durable contributor identity is deferred.
