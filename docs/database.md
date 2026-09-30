@@ -1,6 +1,6 @@
 # PostgreSQL development and the durable slice
 
-Stage 3 uses SQLAlchemy 2.0 Core with async Psycopg 3 connections, SQLAlchemy's normal pool,
+The durable slice uses SQLAlchemy 2.0 Core with async Psycopg 3 connections, SQLAlchemy's normal pool,
 and Alembic migrations. It has exactly 14 application tables. CI uses PostgreSQL 18. There is
 no alternative SQLite acceptance path, extra driver, repository hierarchy or job framework.
 
@@ -20,6 +20,9 @@ uv run alembic check
 Alembic uses `RESEARCH_ATLAS_TEST_DATABASE_URL` when explicitly set, otherwise the runtime URL.
 The initial revision is `0001_lean_persistence`. It creates the schema with frozen migration
 operations, not `metadata.create_all()`. Live Core `target_metadata` enables drift checking.
+Stage 4 adds `0002_insight_publication`; `0001_lean_persistence` is unchanged. CI explicitly upgrades
+to 0001 and then head before running `alembic check`. Existing schema-only Insights remain drafts;
+the migration does not manufacture configuration bytes or certify them as published.
 Downgrade is destructive schema removal intended only for disposable development databases.
 
 `create_database_engine()` validates the Psycopg URL and returns an unconnected async engine.
@@ -36,6 +39,8 @@ They return IDs/small results, never ORM model graphs. They are available from:
 | `runs` | `create_project`, `create_research_run`, `start_search_execution` |
 | `discovery` | `DiscoveryPersistence.load_search_resume_state`, `commit_discovery_batch`, `record_search_failure` |
 | `evidence` | `record_source_document`, `load_source_document`, `record_extraction`, `publish_accepted_extraction`, `select_run_source_extraction`, `set_processing_state`, `apply_screening_decision` |
+| `insights` | `PostgresInsightPublication.load_evidence`, `publish` |
+| `reads` | `run_progress`, `run_sources`, `source_detail`, `insight_detail`, `insight_evidence`, `study_context`, `output_insights` |
 
 Create a project, a ResearchRun retaining the original request, and a running SearchExecution with
 exact provider/operation/query/ordered parameters and batch limit. Then use the application callable:
@@ -117,5 +122,28 @@ $env:PATH = (Join-Path $PWD '.codex-local\venv\Scripts') + [IO.Path]::PathSepara
 node .\.codex-local\venv\Lib\site-packages\pyright\dist\index.js --venvpath .\.codex-local
 ```
 
-No document downloading/parsing, extraction execution, LLM call, synthesis, API/frontend, or generated
-recommendations/prompts are implemented. Insight tables are schema only. Run 001 remains UNEXECUTED.
+Insight publication retains status, publication timestamp, exact configuration BYTEA and canonical
+publication digest on the existing `insights` relation. It checks run existence, exact configuration
+hash, complete unique evidence selection, and at least one supporting rationale. Each linked Finding
+must resolve through the accepted extraction currently selected for its Source in the producing run.
+Membership row locks serialize publication validation with selection changes. The proposal/synthesis
+call happens outside this transaction. Exact historical retry checks the retained publication digest
+before active selection, so a retry does not fail merely because the run later selected new evidence.
+
+The transaction inserts a draft, links its complete bounded evidence set, then marks it published.
+Other transactions see all or none. A trigger blocks updates/deletes of published Insights; another
+locks the parent and blocks any changes to published relationships. Publication requires supporting
+evidence and at most 100 links. The configuration checksum and producing provenance are SQL checks.
+Changed content/configuration/provenance under an existing UUID raises `ImmutableRecordConflict`.
+Legacy drafts are inspectable but cannot be passed to output generation or overwritten by publication;
+deliberately publish a new UUID after validating the proposal.
+
+No new index or table is required: the existing run, relationship composite primary key and Finding
+FK indexes serve Stage 4 reads. Multi-query product reads use a REPEATABLE READ snapshot; normal writes
+retain READ COMMITTED. Query-count acceptance tests cover all seven reads at sizes 5 and 10; tests also
+cover invalid proposals/publication rollback, immutable history, selection races between packet load
+and publication, mixed/null evidence, dependence warnings, citations and pagination/isolation.
+
+See [synthesis and product access](synthesis-and-product-access.md) for exact bounds and callables.
+No document downloading/parsing, extraction engine, concrete external LLM, API/frontend, or generated
+recommendation/prompt service is implemented. Run 001 remains UNEXECUTED.

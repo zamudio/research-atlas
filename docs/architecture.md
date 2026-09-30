@@ -2,8 +2,9 @@
 
 The independent architecture audit remains the authority. Stage 1 removed speculative machinery;
 Stage 2 settles ingestion/provenance behavior and small content/evidence contracts. Stage 3 adds
-PostgreSQL persistence for one research slice. Content acquisition, extraction execution, synthesis
-generation and frontend/API remain unbuilt.
+PostgreSQL persistence for one research slice. Stage 4 completes the validated synthesis boundary,
+Insight publication, seven bounded reads and Evidence Brief. Content acquisition, extraction
+execution, a concrete LLM implementation and frontend/API remain outside this correction.
 
 ## Boundaries and retained records
 
@@ -85,9 +86,11 @@ cannot be published as accepted evidence.
 Insight replaces the temporary assessment record. Each Insight is one claim with producing run,
 qualifications, uncertainty/generalizability and reproducible synthesis configuration/provenance.
 InsightFinding is an explicit supporting/contradicting/contextual decision with rationale. Finding
-nullness or statistical direction never chooses that relationship. These records do not generate
-claims or validate empirical support; accepted evidence links require validation at future execution
-and persistence boundaries.
+nullness or statistical direction never chooses that relationship. A strict Pydantic proposal accounts
+for every explicitly selected Finding exactly once. The publication operation verifies the run's
+currently selected accepted extractions, exact configuration bytes/hash and at least one supporting
+relationship. These checks establish attribution and explicit appraisal, not the scientific truth of
+a claim. Human or supplied synthesizer judgment remains responsible for the appraisal.
 
 ## Flexible detail and downstream outputs
 
@@ -121,5 +124,18 @@ selection stays stable; cross-search concurrency does not promise provider-order
 Evidence operations accept supplied bytes and validated results. PostgreSQL retains BYTEA content
 and configuration, JSONB scientific details and relational provenance. Accepted publication and
 explicit selection are separate operations. SQL constraints and immutability triggers protect
-finalized content/evidence, including against accidental direct writes. The schema-only Insight
-relations do not implement synthesis, publishing services or product reads.
+finalized content/evidence, including against accidental direct writes. Migration
+`0002_insight_publication` adds only four Insight columns and narrow publication/link protections;
+the accepted initial migration is unchanged. Published Insight and relationship rows are immutable.
+
+`application/synthesis.py` accepts an explicit bounded Finding set and a supplied `InsightSynthesizer`.
+The PostgreSQL adapter loads the evidence packet and revalidates current selection at publication
+while locking memberships. Configuration/provenance and a canonical digest make exact UUID retries
+idempotent; changed results require new Insight IDs. Later selection does not redirect old links.
+
+Typed reads in `application/read_models.py` are implemented by focused Core queries in
+`infrastructure/persistence/reads.py`. Multi-query reads use a consistent REPEATABLE READ snapshot.
+Evidence summaries distinguish Findings, Studies and Sources and conservatively warn about dependence.
+The deterministic Evidence Brief presents all selected published claims and all three relationship
+roles, retaining caveats and exact evidence identities. It performs no second synthesis and creates
+no output table. See [product access](synthesis-and-product-access.md) for bounds and callable examples.

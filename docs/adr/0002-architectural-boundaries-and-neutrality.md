@@ -14,7 +14,7 @@ Provider implementations belong behind application ports. Dataclasses are useful
 internal state; external input is validated at its boundary. Project configuration is data,
 not a switch that imports consumer-specific behavior into the core.
 
-Source, Study, and Finding have different responsibilities. Future synthesis must explicitly
+Source, Study, and Finding have different responsibilities. Synthesis must explicitly
 reference Findings; consumer recommendations must retain evidence and its qualifications.
 This separation does not require formal approval contracts, ontology registries, or application
 promotion entities.

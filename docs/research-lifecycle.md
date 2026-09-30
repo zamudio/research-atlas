@@ -22,7 +22,7 @@ inputs never change.
 
 RunSource.processing_state independently records discovered, retrieved, extracted, excluded,
 unavailable or failed coverage for each run/Source. Current screening state and reasons come from
-ScreeningDecision values on that membership, not a screening history table. Future progress reads
+ScreeningDecision values on that membership, not a screening history table. Bounded progress reads
 combine indexed search outcomes and membership states; a successful search does not imply that its
 Sources were retrieved or extracted. State updates are explicit and do not clear accepted selections.
 
@@ -57,6 +57,23 @@ Once an Insight references a Finding, later extraction selection changes cannot 
 that link to newer evidence. Old finalized extraction content remains available for drill-down.
 Generated summaries, recommendations, reports and coding prompts are downstream renderings of
 selected Insights and their qualifications; no application promotion ontology is required.
+
+Stage 4 implements that path with `synthesize_insight`: the caller supplies 1..100 distinct Finding
+IDs, exact synthesis configuration, provenance and publication time. A bounded packet supplies the
+immutable evidence chain and full selected Source metadata. A supplied synthesizer returns strict
+proposal JSON, accounting for each Finding exactly once. Every role needs a nonblank rationale and
+at least one must be supporting. A null Finding can explicitly support a suitably limited claim.
+
+Publication repeats current accepted-selection validation under run/Source row locks. Failure rolls
+back the Insight and every link. Exact retry uses the same UUID, content/configuration/provenance and
+publication time; revised conclusions use a new UUID. Published rows and links cannot be mutated.
+An exact retry still succeeds after selection changes because it does not publish new evidence.
+
+Product reads expose progress, Source pages/detail, Insight detail/evidence, exact Study content and
+batched output input. Evidence Brief generation accepts 1..20 explicitly selected published Insights,
+includes every relationship and caveat, and cites Finding/Study/Extraction/document/Source identities.
+Counts separate Findings, distinct Studies and distinct Sources; repeated Findings and uncertain
+cross-study/publication independence remain visible. No global Study identity resolver is introduced.
 
 ## Acceptance examples
 

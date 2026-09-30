@@ -106,4 +106,7 @@ def test_frozen_migration_renders_all_fourteen_postgresql_relations_without_conn
         assert f"CREATE TABLE {table.name} (" in sql
         assert "CASCADE" not in str(CreateTable(table).compile(dialect=postgresql.dialect()))
     assert "CREATE TRIGGER immutable_findings" in sql
+    assert "ALTER TABLE insights ADD COLUMN publication_status" in sql
+    assert "CREATE TRIGGER immutable_insights" in sql
+    assert "CREATE TRIGGER immutable_insight_findings" in sql
     assert "fk_sources_display_observation" in sql

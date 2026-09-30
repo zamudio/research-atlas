@@ -21,10 +21,14 @@ ResearchRequest -> ResearchRun -> SearchExecution -> observations -> Source
     -> SourceDocument -> Extraction -> Study -> Finding -> Insight -> useful outputs
 ```
 
-Stage 3 implements the [documented persistence semantics](docs/persistence-boundary.md) with
-SQLAlchemy Core, Psycopg and Alembic. Insight tables exist for integrity only. There is no document
-acquisition, extraction execution, LLM call, synthesis generation, frontend/API or generated output.
-See [database setup and operations](docs/database.md) for configuration and the callable slice.
+Stage 4 adds validated synthesis from explicitly selected Findings, atomic immutable Insight
+publication, seven bounded typed product reads, and a deterministic cited Markdown Evidence Brief.
+Synthesis uses a caller-supplied provider-neutral implementation; no external LLM is bundled.
+SQLAlchemy Core, Psycopg and Alembic retain exactly 14 application relations. There is no document
+acquisition/extraction engine or frontend/API. OpenAlex remains primary and Crossref optional;
+Semantic Scholar and Zotero remain deferred.
+See [synthesis and product access](docs/synthesis-and-product-access.md) for the callable workflow
+and [database setup](docs/database.md) for configuration and migrations.
 
 ## Development
 

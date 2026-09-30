@@ -37,6 +37,7 @@ jobs:
       - name: Verify configured Python
         run: test "$(python --version)" = "Python $(cat .python-version)"
       - run: uv sync --locked
+      - run: uv run alembic upgrade 0001_lean_persistence
       - run: uv run alembic upgrade head
       - run: uv run alembic check
       - run: uv run pytest

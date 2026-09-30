@@ -1,7 +1,8 @@
-# Stage 3 persistence boundary
+# Lean persistence boundary
 
 This is the approved lean relational spine and its acceptance semantics, implemented by Stage 3
 using SQLAlchemy Core, async Psycopg connections and Alembic revision `0001_lean_persistence`.
+Stage 4 extends Insight publication with `0002_insight_publication` without changing that history.
 There is no ORM entity hierarchy, generic repository, UoW, acquisition or execution framework.
 
 ## Relations and ordinary reads
@@ -20,7 +21,7 @@ There is no ORM entity hierarchy, generic repository, UoW, acquisition or execut
 | extractions | Attempt UUID; creating run and document FKs; purpose, exact configuration hash, tool/model identity, validation/review and status. |
 | studies | Study UUID; Source and extraction FKs; stable study context and flexible detail. |
 | findings | Finding UUID; Study FK; reported result/uncertainty, anchors into its extraction document and flexible detail. |
-| insights | Claim UUID; producing run FK, configuration/provenance and qualifications. |
+| insights | Claim UUID; producing run FK, configuration/provenance and qualifications; publication status/time, exact configuration bytes and digest. |
 | insight_findings | Unique Insight/Finding pair with explicit role and rationale; both FKs required. |
 
 No contributor, construct, measurement, intervention, taxonomy, protocol, application or export tables.
@@ -95,8 +96,9 @@ license to skip/restart. Stage 3 implements these database guarantees in focused
    back accepted extraction evidence. Finalized evidence is immutable; reruns create separate attempts.
 4. Changing run_sources.selected_extraction_id is explicit and atomic after checking acceptance and
    Source ownership. Active run evidence joins only that selection; old finalized evidence stays intact.
-5. Future Stage 4 Insight publication is atomic with its appraised Finding relationships. Require
-   existing accepted extraction evidence and provenance for each empirical relationship. Existing Insights retain their
+5. Stage 4 Insight publication is atomic with its appraised Finding relationships. Require
+   current selected accepted extraction evidence and provenance for each empirical relationship.
+   Lock those run/Source memberships until publication commits. Existing Insights retain their
    exact Finding links when a run later selects a different extraction. Deletion cannot dangle links.
 
 No lease, distributed lock, job queue or repository abstraction is implied by these requirements.
@@ -162,7 +164,8 @@ search_executions by (run_id, status). Read #1 combines those database aggregate
 source-processing/screening coverage without loading all observations, documents or findings.
 Index foreign keys and pagination/order fields used by the remaining paths. Avoid N+1 per-source/per-finding
 loads by joining or fetching bounded ID sets. None requires whole-project hydration, supersession graph
-traversal or rerunning identity resolution on every read. Detailed SQL/index design belongs to Stage 3.
+traversal or rerunning identity resolution on every read. Stage 4 implements these paths with the
+existing indexes; see [exact read bounds and query counts](synthesis-and-product-access.md).
 
 ## Stage 3 implementation details
 
@@ -208,7 +211,8 @@ traversal or rerunning identity resolution on every read. Detailed SQL/index des
   state remains explicit. Source exclusion updates current screening and state in one transaction;
   study-scoped screening stays current JSON detail on the same membership, not a history table.
 - All required progress, identity and evidence traversal indexes are present, without speculative
-  JSONB GIN/text/vector indexes. Insight relations have identity/FK/role constraints only. Insight
-  publication, synthesis and the seven product read services remain Stage 4 work.
+  JSONB GIN/text/vector indexes. Stage 4 adds Insight publication constraints and immutability triggers,
+  validated synthesis, seven product reads and a deterministic cited Evidence Brief. The relation
+  inventory and accepted Stage 3 migration are unchanged.
 
 See [database setup](database.md) for operation names, migration commands and PostgreSQL test isolation.

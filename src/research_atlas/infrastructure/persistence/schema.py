@@ -387,6 +387,20 @@ insights = sa.Table(
     sa.Column("qualifications", JSONB, nullable=False),
     sa.Column("uncertainty_and_limitations", JSONB, nullable=False),
     sa.Column("generalizability_notes", JSONB, nullable=False),
+    sa.Column("publication_status", sa.Text, nullable=False, server_default="draft"),
+    sa.Column("published_at", sa.DateTime(timezone=True)),
+    sa.Column("configuration", sa.LargeBinary),
+    sa.Column("publication_digest", sa.Text),
+    states("publication_status", "'draft','published'"),
+    sa.CheckConstraint(
+        "publication_status <> 'published' OR (published_at IS NOT NULL "
+        "AND configuration IS NOT NULL AND publication_digest IS NOT NULL "
+        "AND publication_digest ~ '^[0-9a-f]{64}$' "
+        "AND configuration_sha256 = encode(sha256(configuration), 'hex') "
+        "AND record_provenance->>'created_in_run_id' IS NOT NULL "
+        "AND record_provenance->>'created_in_run_id' = run_id)",
+        name="published_content",
+    ),
     sa.CheckConstraint(
         "length(trim(claim)) > 0 AND configuration_sha256 ~ '^[0-9a-f]{64}$'",
         name="claim_configuration",
