@@ -1,7 +1,8 @@
 # Stage 3 persistence boundary
 
-This is the approved lean relational spine and its acceptance semantics. Stage 2 implements
-contracts and bounded ingestion only. No database library, repository, migrations or UoW is added.
+This is the approved lean relational spine and its acceptance semantics, implemented by Stage 3
+using SQLAlchemy Core, async Psycopg connections and Alembic revision `0001_lean_persistence`.
+There is no ORM entity hierarchy, generic repository, UoW, acquisition or execution framework.
 
 ## Relations and ordinary reads
 
@@ -77,7 +78,7 @@ rules must be deterministic. If replay of an uncommitted page returns changed re
 validated page as the retry result without claiming snapshot consistency. If an already committed batch
 key is presented with a different payload digest, expose a replay mismatch and retain the committed
 batch/checkpoint; do not overwrite history or silently inflate counts. Cursor expiry is visible, not a
-license to skip/restart. These database guarantees are specified, not implemented in Stage 2.
+license to skip/restart. Stage 3 implements these database guarantees in focused operations.
 
 ## Atomic boundaries
 
@@ -94,8 +95,8 @@ license to skip/restart. These database guarantees are specified, not implemente
    back accepted extraction evidence. Finalized evidence is immutable; reruns create separate attempts.
 4. Changing run_sources.selected_extraction_id is explicit and atomic after checking acceptance and
    Source ownership. Active run evidence joins only that selection; old finalized evidence stays intact.
-5. Publishing an Insight with its appraised Finding relationships is atomic. Require existing accepted
-   extraction evidence and provenance for each empirical relationship. Existing Insights retain their
+5. Future Stage 4 Insight publication is atomic with its appraised Finding relationships. Require
+   existing accepted extraction evidence and provenance for each empirical relationship. Existing Insights retain their
    exact Finding links when a run later selects a different extraction. Deletion cannot dangle links.
 
 No lease, distributed lock, job queue or repository abstraction is implied by these requirements.
@@ -134,7 +135,7 @@ an unrelated metadata provider. Conflicted observations have no durable SourceDi
 ## Flexible data and content anchors
 
 Project context, ordered credits/reported identifiers, extraction configuration, scientific details,
-locators and qualifications are controlled structured data / future JSONB. Validate probabilistic
+locators and qualifications are controlled structured JSONB data. Validate probabilistic
 extraction output at its boundary before creating trusted records. Do not turn fields such as construct,
 instrument, intervention, comparator or moderator into global identities/tables. Relational FKs preserve
 stable identity, workflow ownership and evidence links; JSONB must not replace those relationships.
@@ -162,3 +163,52 @@ source-processing/screening coverage without loading all observations, documents
 Index foreign keys and pagination/order fields used by the remaining paths. Avoid N+1 per-source/per-finding
 loads by joining or fetching bounded ID sets. None requires whole-project hydration, supersession graph
 traversal or rerunning identity resolution on every read. Detailed SQL/index design belongs to Stage 3.
+
+## Stage 3 implementation details
+
+- The initial migration is frozen; Alembic `target_metadata` uses the live Core schema to detect
+  drift. Exactly the 14 application relations above are created, plus Alembic's version table.
+- Sources retain only identity and selected display observation. Composite foreign keys enforce
+  display/discovery observation ownership, search/run ownership, document/Source/extraction links,
+  accepted Study ownership and accepted same-Source extraction selection.
+- Global exact keys are the primary key of source_identifiers. Reconciliation uses READ COMMITTED,
+  indexed bounded lookups, Source row locks for stored strong-key extension, and nested transactions
+  for unique-key races. Each race rereads all incoming keys and all winner strong keys. Multiple
+  stored Sources or contradictory strong keys quarantine the component; unrelated components commit.
+  Unexpected database errors propagate and leave the batch checkpoint unchanged for retry.
+- Provider snapshots use a partial unique index on provider/publication/content hash. Providerless
+  snapshots instead use search/input batch key/page position. SHA-256 canonical JSON preserves list
+  order and reported values while excluding candidate/observation UUIDs and retrieval times.
+  Last-seen updates never rewrite the original snapshot. If an already resolved identical snapshot
+  participates in a later conflicting component, its prior attribution is preserved and the new
+  search receipt records the contextual conflict with a null result mapping and no new discovery.
+- Search row locks compare the input checkpoint and starting rank. Controlled batch_receipts JSONB
+  maps `initial` or `cursor:` plus the opaque input token to digest, next token, observation/source IDs,
+  and bounded conflict results. It stores no raw provider payload, event stream or worker history.
+  Receipts grow once per committed bounded page of this finite logical search; completed searches
+  retain them for replay. Matching replay returns the committed result even after later progress;
+  mismatching content raises ReplayMismatch. Unknown/stale input raises CheckpointConflict.
+- The caller's validated batch digest covers whole ordered reports, provider publication attribution,
+  rank offset and next/exhausted state. The persistence operation computes it before its transaction.
+  UUID/time changes from re-fetching alone do not turn exact replay into a mismatch.
+- Failure recording compares checkpoint and batch count under the same search lock. It cannot
+  overwrite later progress. Only allowlisted failure classes, HTTP status and a fixed safe message
+  are retained; raw exception messages and secrets are not serialized.
+- Exact supplied content and extraction instructions/configuration are BYTEA. Both Python and SQL
+  verify SHA-256; reads verify document bytes again. The publication boundary accepts UTF-8 passages
+  into those exact bytes and rejects absent/wrong passages, including locator-only accepted anchors.
+  New content gets a new UUID; identical usable versions reuse their stored document UUID. Record
+  operations treat UUID retries as immutable values; new acquisition attempts use new document IDs.
+- Accepted publication retains a canonical evidence digest for exact extraction-UUID replay. Pending
+  attempts can finalize atomically; finalized attempts cannot change. Narrow PostgreSQL triggers
+  reject changes/deletion of finalized documents, extractions and published Studies/Findings.
+  Parent FKs are restrictive, never cascading evidence deletion.
+- No same-creating-run restriction is added to selection: Stage 2 explicitly permits another run to
+  reuse accepted evidence for the same Source. Selection only updates the selected ID; processing
+  state remains explicit. Source exclusion updates current screening and state in one transaction;
+  study-scoped screening stays current JSON detail on the same membership, not a history table.
+- All required progress, identity and evidence traversal indexes are present, without speculative
+  JSONB GIN/text/vector indexes. Insight relations have identity/FK/role constraints only. Insight
+  publication, synthesis and the seven product read services remain Stage 4 work.
+
+See [database setup](database.md) for operation names, migration commands and PostgreSQL test isolation.

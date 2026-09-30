@@ -1,8 +1,9 @@
 # Lean v1 architecture
 
 The independent architecture audit remains the authority. Stage 1 removed speculative machinery;
-Stage 2 settles ingestion/provenance behavior and small content/evidence contracts. Persistence,
-content acquisition, extraction execution, synthesis generation, and frontend/API remain unbuilt.
+Stage 2 settles ingestion/provenance behavior and small content/evidence contracts. Stage 3 adds
+PostgreSQL persistence for one research slice. Content acquisition, extraction execution, synthesis
+generation and frontend/API remain unbuilt.
 
 ## Boundaries and retained records
 
@@ -76,8 +77,10 @@ screening history table. See the persistence boundary for source-level versus st
 
 StudyRecord has an explicit extraction_id. FindingRecord references its Study and requires at least
 one EvidenceAnchor: exact passage and/or plain-text locator in that extraction's document. Page
-numbers are optional; sections/tables are ordinary locator text. Stage 3 must enforce consistent
-Source/Extraction/Study links, not infer them from the prose in RecordProvenance.
+numbers are optional; sections/tables are ordinary locator text. Stage 3 enforces consistent
+Source/Extraction/Study links through composite foreign keys and publication validation. Accepted
+Findings require nonblank exact UTF-8 passages in the retained document; locator-only draft anchors
+cannot be published as accepted evidence.
 
 Insight replaces the temporary assessment record. Each Insight is one claim with producing run,
 qualifications, uncertainty/generalizability and reproducible synthesis configuration/provenance.
@@ -88,8 +91,9 @@ and persistence boundaries.
 
 ## Flexible detail and downstream outputs
 
-Study/Finding details are structured mappings for scientific information, eventually controlled
-JSONB validated by the extraction boundary. Constructs, instruments, interventions, comparators,
+Study/Finding details are structured mappings stored as controlled JSONB; persistence rejects
+non-JSON values and non-finite numbers. Scientific meaning remains caller validation responsibility.
+Constructs, instruments, interventions, comparators,
 moderators and outcomes do not gain global identities. Trusted dataclasses are not probabilistic
 output validators and do not deeply freeze nested mappings. Persisted finalized evidence must be
 immutable. Recommendations, design guidance, prompts and reports remain downstream renderings.
@@ -100,3 +104,22 @@ ADRs 0001/0002 remain central; ADRs 0003-0005 remain superseded history.
 
 See [provider behavior](providers.md), [lifecycle](research-lifecycle.md), and the
 [Stage 3 persistence boundary](persistence-boundary.md) for transactions, uniqueness and query paths.
+
+## Persistent slice
+
+`infrastructure/persistence/schema.py` defines exactly 14 Core tables, shared with Alembic metadata.
+The frozen initial migration creates their PostgreSQL constraints, indexes and narrow immutability
+triggers. The domain remains dataclasses; there is no parallel ORM entity graph or generic repository.
+
+`application/durable_ingestion.py` depends on three operation-specific persistence methods. It loads
+resume state, performs one provider call outside a transaction, then commits the validated batch.
+`DiscoveryPersistence` locks the SearchExecution row and commits observations, exact identity,
+memberships, discoveries, conflicts, counts, receipts and next checkpoint together. Indexed identity
+lookups and unique-key savepoints reconcile only bounded incoming components. Stored display
+selection stays stable; cross-search concurrency does not promise provider-order priority.
+
+Evidence operations accept supplied bytes and validated results. PostgreSQL retains BYTEA content
+and configuration, JSONB scientific details and relational provenance. Accepted publication and
+explicit selection are separate operations. SQL constraints and immutability triggers protect
+finalized content/evidence, including against accidental direct writes. The schema-only Insight
+relations do not implement synthesis, publishing services or product reads.

@@ -11,21 +11,24 @@ provider responses, preserves whole attributable metadata observations, reconcil
 identity, and exposes partial searches, retry checkpoints, and isolated identity conflicts.
 Display metadata comes from one identified observation, never a mixture of provider fields.
 
-Small trusted contracts now describe SourceDocument versions, Extraction attempts, Study/Finding
-content provenance, and Insight/Finding relationships. They do not download content, execute
-extraction, generate synthesis, or persist research. Run 001 remains UNEXECUTED.
+PostgreSQL persistence now retains runs, bounded search batches, reconciled Sources, complete
+metadata observations, supplied SourceDocument content, and accepted Extraction/Study/Finding
+results. Batch/checkpoint commits and accepted evidence publication are atomic. Immutable content
+and evidence remain addressable across retries and re-extraction. Run 001 remains UNEXECUTED.
 
 ```text
 ResearchRequest -> ResearchRun -> SearchExecution -> observations -> Source
     -> SourceDocument -> Extraction -> Study -> Finding -> Insight -> useful outputs
 ```
 
-Stage 3 will implement the [documented persistence semantics](docs/persistence-boundary.md).
-Later stages provide content acquisition, extraction/synthesis execution, and frontend access.
+Stage 3 implements the [documented persistence semantics](docs/persistence-boundary.md) with
+SQLAlchemy Core, Psycopg and Alembic. Insight tables exist for integrity only. There is no document
+acquisition, extraction execution, LLM call, synthesis generation, frontend/API or generated output.
+See [database setup and operations](docs/database.md) for configuration and the callable slice.
 
 ## Development
 
-Requires Python 3.14.7 and uv. The lockfile is current; no new Stage 2 dependencies are required.
+Requires Python 3.14.7 and uv; persistence requires PostgreSQL (CI uses PostgreSQL 18).
 
 ```shell
 uv sync --locked
@@ -35,6 +38,10 @@ uv run ruff format --check .
 uv run pyright
 ```
 
+PostgreSQL tests skip explicitly unless `RESEARCH_ATLAS_TEST_DATABASE_URL` is set. CI upgrades
+the schema, checks migration drift, and runs PostgreSQL acceptance tests.
+
+- [Database setup](docs/database.md)
 - [Architecture](docs/architecture.md)
 - [Research lifecycle](docs/research-lifecycle.md)
 - [Providers and checkpoints](docs/providers.md)

@@ -2,20 +2,23 @@
 
 ResearchRequest captures what the user asked and optional planning context. ResearchRun owns the
 project, original request, lifecycle and timestamps. SearchExecution records what actually ran.
-The current diagnostic does not instantiate/persist these execution records. Run 001 is UNEXECUTED.
+The metadata diagnostic remains in-memory. A separate callable persistence path creates durable
+project/run/search records and processes one batch at a time. Run 001 is UNEXECUTED.
 
 ## Discovery and progress
 
 Fetch one validated bounded LiteratureBatch using the previous checkpoint. Preserve observations,
-resolve exact components, and retain conflict cases without inventing resolved Source IDs. A future
-transaction must commit those results together with the next checkpoint. Only then fetch another
-page. In-memory DiscoverSources reports bounded succeeded/partial/failed outcomes today.
+resolve exact components, and retain conflict cases without inventing resolved Source IDs.
+DiscoveryPersistence commits those results together with the next checkpoint and a replay receipt.
+Only then fetch another page. In-memory DiscoverSources retains its diagnostic behavior.
 
 SearchExecution's requested_limit is the per-batch limit. completed_batches and provider_result_count
 are durable cumulative progress in Stage 3; the diagnostic reports counts for its invocation only.
 A partial status pauses an incomplete execution with checkpoint and optional safe error metadata.
 completed_at on partial records marks the end of that invocation, not exhaustion of the search;
-resuming the same logical search sets running and clears that time. Exact inputs never change.
+a resumed page retains the last durable outcome while provider I/O is outstanding. Only the next
+commit/failure changes durable progress; there is no job lease or in-flight ownership state. Exact
+inputs never change.
 
 RunSource.processing_state independently records discovered, retrieved, extracted, excluded,
 unavailable or failed coverage for each run/Source. Current screening state and reasons come from
@@ -29,7 +32,7 @@ SourceDocument identifies an immutable version of anchorable content with Source
 retrieval context/time and usability status. A changed parsed text or payload is a new version.
 Extraction records one attempt against exactly that version, creating run, purpose, configuration
 hash, tools/models, timing and validation/review outcome. These are contracts, not download/extraction
-services. Instruction and configuration bytes must be retained alongside their hash in Stage 3.
+services. Persistence retains exact content and configuration bytes alongside their SHA-256 hashes.
 
 Queued/running attempts are distinct from accepted, review_needed, failed and rejected results.
 Finalized attempts cannot be overwritten. A rerun creates a new extraction identity even if its
@@ -39,7 +42,9 @@ attempts cannot become selected run evidence merely because output exists.
 A RunSource can explicitly select one accepted extraction for a Source. Selection does not combine
 all extraction attempts. StudyRecord.extraction_id owns the study set; FindingRecord.source_study_id
 owns each result, with an exact passage and/or locator in the document selected by that extraction.
-No page number is mandatory. Source and Study remain different entities.
+No page number is mandatory. Source and Study remain different entities. The accepted publication
+operation requires exact passage text for every anchor, matched against the retained UTF-8 bytes;
+a locator by itself is insufficient. One invalid Study/Finding rolls back the whole publication.
 
 ## Synthesis and use
 
@@ -68,3 +73,8 @@ test_evidence_contracts.py under tests/unit:
 
 [Stage 3 persistence semantics](persistence-boundary.md) defines the required constraints and read
 paths. No whole-project hydration or unbounded history traversal is part of these contracts.
+
+PostgreSQL acceptance cases in `tests/persistence` exercise migrations, unique-key races, bounded
+identity reconciliation, receipt replay/mismatch, transaction rollback, immutable documents,
+publication rollback, selection, screening and restrictive deletion. They use isolated temporary
+schemas only when the explicit test database URL is supplied. See [database setup](database.md).

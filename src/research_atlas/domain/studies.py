@@ -63,7 +63,7 @@ class ResearchRun:
     """A research effort retaining user intent separately from planned operations.
 
     SearchExecution records own the exact searches that actually ran. These are
-    data records only; orchestration and durable progress are later stages.
+    trusted data records; the persistence boundary owns durable progress.
     """
 
     run_id: str
