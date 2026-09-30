@@ -27,7 +27,12 @@ from research_atlas.infrastructure.providers.openalex import (
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Discover and normalize a few sources for review")
     parser.add_argument("query", help="OpenAlex search query")
-    parser.add_argument("--limit", type=int, default=8, choices=range(1, 11))
+    parser.add_argument(
+        "--limit", type=int, default=8, choices=range(1, 11), help="records per batch"
+    )
+    parser.add_argument(
+        "--batches", type=int, default=1, choices=range(1, 11), help="maximum batches per operation"
+    )
     parser.add_argument(
         "--openalex-semantic",
         metavar="QUERY",
@@ -47,6 +52,7 @@ async def run_dry_run(
     *,
     limit: int,
     settings: ProviderSettings,
+    max_batches: int = 1,
     openalex_semantic_query: str | None = None,
     crossref_bibliographic_query: str | None = None,
 ) -> str:
@@ -54,6 +60,7 @@ async def run_dry_run(
         LiteratureSearchRequest(
             OpenAlexLiteratureSource(settings.openalex_api_key),
             LiteratureQuery(query_text, limit=limit),
+            max_batches=max_batches,
         )
     ]
     if openalex_semantic_query is not None:
@@ -61,6 +68,7 @@ async def run_dry_run(
             LiteratureSearchRequest(
                 OpenAlexSemanticSearch(settings.openalex_api_key),
                 LiteratureQuery(openalex_semantic_query, limit=limit),
+                max_batches=max_batches,
             )
         )
     if crossref_bibliographic_query is not None:
@@ -68,6 +76,7 @@ async def run_dry_run(
             LiteratureSearchRequest(
                 CrossrefWorksSearch(mailto=settings.crossref_mailto),
                 LiteratureQuery(crossref_bibliographic_query, limit=limit),
+                max_batches=max_batches,
             )
         )
     report = await DiscoverSources(searches).execute()
@@ -82,6 +91,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             run_dry_run(
                 args.query,
                 limit=args.limit,
+                max_batches=args.batches,
                 openalex_semantic_query=args.openalex_semantic,
                 crossref_bibliographic_query=args.crossref_bibliographic,
                 settings=ProviderSettings(),

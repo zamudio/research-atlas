@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from research_atlas.application.ports.literature_source import LiteratureQuery, LiteratureRecord
+from research_atlas.application.ports.literature_source import LiteratureBatch, LiteratureQuery
 from research_atlas.cli import dry_run
 from research_atlas.infrastructure.config import ProviderSettings
 
@@ -16,8 +16,10 @@ class FakeOpenAlex:
     def __init__(self, _api_key: str | None = None) -> None:
         pass
 
-    async def search(self, _query: LiteratureQuery) -> tuple[LiteratureRecord, ...]:
-        return ()
+    async def search(
+        self, _query: LiteratureQuery, *, checkpoint: str | None = None
+    ) -> LiteratureBatch:
+        return LiteratureBatch((), None, True)
 
 
 class FakeSemantic(FakeOpenAlex):
@@ -56,6 +58,8 @@ def test_cli_supported_operations_preserve_exact_queries_and_write_report(
                 " bibliography ",
                 "--limit",
                 "2",
+                "--batches",
+                "2",
                 "--output",
                 str(output),
             ]
@@ -71,6 +75,7 @@ def test_cli_supported_operations_preserve_exact_queries_and_write_report(
         ("crossref.works", " bibliography ", 2),
     ]
     assert report["metadata_observations"] == []
+    assert all(item["max_batches"] == 2 for item in report["searches"])
     assert captured.err == ""
 
 
@@ -87,12 +92,14 @@ def test_cli_failure_has_json_stdout_and_nonzero_exit(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     class FailingSource(FakeOpenAlex):
-        async def search(self, _query: LiteratureQuery) -> tuple[LiteratureRecord, ...]:
+        async def search(
+            self, _query: LiteratureQuery, *, checkpoint: str | None = None
+        ) -> LiteratureBatch:
             raise RuntimeError("unavailable")
 
     monkeypatch.setattr(dry_run, "OpenAlexLiteratureSource", FailingSource)
     assert dry_run.main(["query"]) == 1
     captured = capsys.readouterr()
     report = json.loads(captured.out)
-    assert report["provider_outcomes"][0]["success"] is False
+    assert report["provider_outcomes"][0]["status"] == "failed"
     assert "all literature searches failed" in captured.err

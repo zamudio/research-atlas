@@ -1,10 +1,11 @@
 """Actual research execution and simple run-specific screening records."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from typing import Literal
 from uuid import UUID
 
+from research_atlas.domain.content import Extraction, SourceDocument
 from research_atlas.domain.provenance import RecordProvenance
 
 
@@ -29,8 +30,10 @@ class SearchExecution:
     requested_limit: int | None
     started_at: datetime
     completed_at: datetime | None
-    status: Literal["running", "succeeded", "failed", "cancelled"]
+    status: Literal["running", "succeeded", "partial", "failed", "cancelled"]
     provider_result_count: int | None = None
+    checkpoint: str | None = None
+    completed_batches: int = 0
     error_type: str | None = None
     error_status_code: int | None = None
     error_message: str | None = None
@@ -50,8 +53,19 @@ class SearchExecution:
             raise ValueError("requested_limit must be positive")
         if self.provider_result_count is not None and self.provider_result_count < 0:
             raise ValueError("provider_result_count cannot be negative")
-        if self.status in {"succeeded", "failed", "cancelled"} and self.completed_at is None:
+        if (
+            self.status in {"succeeded", "partial", "failed", "cancelled"}
+            and self.completed_at is None
+        ):
             raise ValueError("terminal search executions require completed_at")
+        if self.completed_batches < 0:
+            raise ValueError("completed_batches cannot be negative")
+        if self.status == "partial" and (
+            self.checkpoint is None or self.provider_result_count is None
+        ):
+            raise ValueError("partial searches require checkpoint and progress count")
+        if self.status == "succeeded" and self.checkpoint is not None:
+            raise ValueError("succeeded searches cannot retain a continuation")
         if self.status == "succeeded" and self.provider_result_count is None:
             raise ValueError("successful search executions require provider_result_count")
         if self.status == "failed" and self.error_type is None:
@@ -60,12 +74,13 @@ class SearchExecution:
 
 @dataclass(frozen=True, slots=True)
 class SourceDiscovery:
-    """Provenance for a source entering a run through a logical search."""
+    """One resolved Source's discovery, attributed to its exact metadata observation."""
 
     discovery_id: str
     search_execution_id: str
     run_id: str
     source_id: UUID
+    observation_id: UUID
     discovered_at: datetime
     provider_record_id: str | None = None
     result_position: int | None = None
@@ -95,3 +110,29 @@ class ScreeningDecision:
             raise ValueError("screening decision identities must be non-empty")
         if any(not reason_code for reason_code in self.reason_codes):
             raise ValueError("screening reason_codes must be non-empty strings")
+
+
+@dataclass(frozen=True, slots=True)
+class RunSource:
+    """Current run-specific processing coverage, separate from search outcomes.
+
+    Processing state is set explicitly; selecting evidence does not rewrite it.
+    A failed later attempt may retain a previously accepted extraction selection.
+    """
+
+    run_id: str
+    source_id: UUID
+    selected_extraction_id: UUID | None = None
+    processing_state: Literal[
+        "discovered", "retrieved", "extracted", "excluded", "unavailable", "failed"
+    ] = "discovered"
+
+    def select_extraction(self, extraction: Extraction, document: SourceDocument) -> RunSource:
+        if extraction.status != "accepted" or document.status != "usable":
+            raise ValueError("selection requires accepted extraction of usable content")
+        if (
+            extraction.source_document_id != document.document_id
+            or document.source_id != self.source_id
+        ):
+            raise ValueError("selected extraction must belong to this Source's document")
+        return replace(self, selected_extraction_id=extraction.extraction_id)

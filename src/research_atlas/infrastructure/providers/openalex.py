@@ -1,19 +1,72 @@
 """OpenAlex discovery adapter."""
 
 import asyncio
-from collections.abc import Callable, Mapping
+from collections.abc import Callable
 from datetime import UTC, datetime
 from threading import Lock
 from time import monotonic
-from typing import ClassVar, cast
+from typing import ClassVar
 
 import httpx
+from pydantic import Field
 
-from research_atlas.application.ports.literature_source import LiteratureQuery, LiteratureRecord
+from research_atlas.application.ports.literature_source import (
+    LiteratureBatch,
+    LiteratureQuery,
+    LiteratureRecord,
+    LiteratureSourceError,
+)
 from research_atlas.application.source_identity import identified_source
 from research_atlas.domain.contributors import BibliographicCredit
 from research_atlas.domain.studies import ExternalIdentifier, SourceProvenance
 from research_atlas.infrastructure.providers._http import Sleep, get_with_retries
+from research_atlas.infrastructure.providers._response import (
+    WireModel,
+    malformed,
+    next_checkpoint,
+    parse_response,
+    read_checkpoint,
+)
+
+
+class _Author(WireModel):
+    id: str | None = None
+    display_name: str | None = None
+    orcid: str | None = None
+
+
+class _Authorship(WireModel):
+    raw_author_name: str | None = None
+    author: _Author | None = None
+
+
+class _Location(WireModel):
+    landing_page_url: str | None = None
+
+
+class _Work(WireModel):
+    id: str = Field(min_length=1)
+    doi: str | None = None
+    title: str | None = None
+    authorships: list[_Authorship] | None = None
+    publication_year: int | None = None
+    publication_date: str | None = None
+    type: str | None = None
+    primary_location: _Location | None = None
+    ids: dict[str, str | int | None] | None = None
+
+
+class _Meta(WireModel):
+    next_cursor: str | None
+
+
+class _Results(WireModel):
+    results: list[_Work]
+
+
+class _Envelope(_Results):
+    meta: _Meta
+
 
 OPENALEX_SEMANTIC_MINIMUM_INTERVAL_SECONDS = 1.1
 OPENALEX_SEMANTIC_MAXIMUM_QUERY_CHARACTERS = 2_000
@@ -83,133 +136,106 @@ class OpenAlexLiteratureSource:
         self._api_key = api_key
         self._client = client
 
-    async def search(self, query: LiteratureQuery) -> tuple[LiteratureRecord, ...]:
-        if query.limit < 1:
-            return ()
+    async def search(
+        self, query: LiteratureQuery, *, checkpoint: str | None = None
+    ) -> LiteratureBatch:
         if self._client is not None:
-            return await self._search(self._client, query)
+            return await self._search(self._client, query, checkpoint)
         async with httpx.AsyncClient(timeout=20.0) as client:
-            return await self._search(client, query)
+            return await self._search(client, query, checkpoint)
 
     async def _search(
-        self, client: httpx.AsyncClient, query: LiteratureQuery
-    ) -> tuple[LiteratureRecord, ...]:
+        self, client: httpx.AsyncClient, query: LiteratureQuery, checkpoint: str | None
+    ) -> LiteratureBatch:
+        cursor, offset = read_checkpoint(checkpoint, self.operation_id, query)
         params: dict[str, str | int] = {
             "search": query.query,
-            "per_page": min(query.limit, 100),
-            "cursor": "*",
+            "per_page": query.limit,
+            "cursor": cursor,
             "select": self._select,
         }
-        if reserved := {parameter.name for parameter in query.parameters} & params.keys():
-            raise ValueError(f"OpenAlex adapter manages reserved parameters: {sorted(reserved)}")
-        headers = {"Authorization": f"Bearer {self._api_key}"} if self._api_key else None
-        records: list[LiteratureRecord] = []
-        while len(records) < query.limit:
-            request_params = httpx.QueryParams(params)
-            for parameter in query.parameters:
-                request_params = request_params.add(parameter.name, parameter.value)
-            response = await get_with_retries(
-                client,
-                f"{self.base_url}/works",
-                params=request_params,
-                headers=headers,
+        reserved = {
+            "search",
+            "search.exact",
+            "search.semantic",
+            "per_page",
+            "cursor",
+            "select",
+            "page",
+            "api_key",
+        }
+        if {parameter.name for parameter in query.parameters} & reserved:
+            raise ValueError("OpenAlex adapter manages reserved parameters")
+        request_params = httpx.QueryParams(params)
+        for parameter in query.parameters:
+            request_params = request_params.add(parameter.name, parameter.value)
+        response = await get_with_retries(
+            client,
+            f"{self.base_url}/works",
+            params=request_params,
+            headers={"Authorization": f"Bearer {self._api_key}"} if self._api_key else None,
+        )
+        payload = parse_response(response, _Envelope)
+        if len(payload.results) > query.limit:
+            raise malformed()
+        cursor_after = payload.meta.next_cursor
+        if cursor_after is not None and (not cursor_after.strip()):
+            raise malformed()
+        records = tuple(self._map_work(work) for work in payload.results)
+        exhausted = not records or cursor_after is None
+        token = (
+            None
+            if exhausted
+            else next_checkpoint(
+                cursor_after or "", offset + len(records), self.operation_id, query
             )
-            payload = cast(Mapping[str, object], response.json())
-            results = payload.get("results", [])
-            if not isinstance(results, list):
-                raise ValueError("OpenAlex response results must be a list")
-            for raw in cast(list[object], results):
-                if isinstance(raw, Mapping):
-                    records.append(self._map_work(cast(Mapping[str, object], raw)))
-                    if len(records) == query.limit:
-                        break
-            meta = payload.get("meta", {})
-            meta_mapping: Mapping[str, object] = (
-                cast(Mapping[str, object], meta) if isinstance(meta, Mapping) else {}
-            )
-            next_cursor = meta_mapping.get("next_cursor")
-            if len(records) >= query.limit or not isinstance(next_cursor, str) or not results:
-                break
-            params["cursor"] = next_cursor
-            params["per_page"] = min(query.limit - len(records), 100)
-        return tuple(records)
+        )
+        return LiteratureBatch(records, token, exhausted, offset)
 
     @staticmethod
-    def _map_work(work: Mapping[str, object]) -> LiteratureRecord:
-        work_id = str(work.get("id") or "").rsplit("/", maxsplit=1)[-1]
-        retrieved_at = datetime.now(UTC)
+    def _map_work(work: _Work) -> LiteratureRecord:
+        work_id = work.id.strip().rstrip("/").rsplit("/", maxsplit=1)[-1]
+        if not work_id:
+            raise malformed()
         identifiers = [ExternalIdentifier("openalex", work_id)]
-        doi = work.get("doi")
-        if isinstance(doi, str) and doi:
-            identifiers.append(ExternalIdentifier("doi", doi))
-        ids = work.get("ids")
-        if isinstance(ids, Mapping):
-            id_mapping = cast(Mapping[str, object], ids)
-            for provider_key, namespace in (
-                ("pmid", "pmid"),
-                ("pmcid", "pmcid"),
-                ("mag", "mag"),
-            ):
-                value = id_mapping.get(provider_key)
-                if isinstance(value, (str, int)) and str(value):
-                    identifiers.append(ExternalIdentifier(namespace, str(value)))
-
-        credits: list[BibliographicCredit] = []
-        authorships = work.get("authorships")
-        if isinstance(authorships, list):
-            for authorship in cast(list[object], authorships):
-                if not isinstance(authorship, Mapping):
-                    continue
-                authorship_mapping = cast(Mapping[str, object], authorship)
-                author = authorship_mapping.get("author")
-                author_mapping: Mapping[str, object] = (
-                    cast(Mapping[str, object], author) if isinstance(author, Mapping) else {}
-                )
-                raw_name = authorship_mapping.get("raw_author_name")
-                name = author_mapping.get("display_name")
-                display_name = (raw_name.strip() if isinstance(raw_name, str) else "") or (
-                    name.strip() if isinstance(name, str) else ""
-                )
-                if not display_name:
-                    continue
-                raw_author_id = author_mapping.get("id")
-                author_id = (
-                    raw_author_id.strip().rstrip("/").rsplit("/", maxsplit=1)[-1]
-                    if isinstance(raw_author_id, str) and raw_author_id.strip()
-                    else None
-                )
-                orcid = author_mapping.get("orcid")
-                credits.append(
-                    BibliographicCredit(
-                        display_name=display_name,
-                        provider_record_id=author_id or None,
-                        external_identifiers=(("orcid", orcid.strip()),)
-                        if isinstance(orcid, str) and orcid.strip()
-                        else (),
-                    )
-                )
-
-        location = work.get("primary_location")
-        location_mapping: Mapping[str, object] = (
-            cast(Mapping[str, object], location) if isinstance(location, Mapping) else {}
+        if work.doi:
+            identifiers.append(ExternalIdentifier("doi", work.doi))
+        identifiers.extend(
+            ExternalIdentifier(namespace, str(value))
+            for namespace, value in (work.ids or {}).items()
+            if value is not None
         )
-        landing_url = location_mapping.get("landing_page_url")
-        raw_year = work.get("publication_year")
-        year = raw_year if isinstance(raw_year, int) else None
-        publication_date = work.get("publication_date")
-        if year is None and isinstance(publication_date, str) and len(publication_date) >= 4:
+        credits: list[BibliographicCredit] = []
+        for authorship in work.authorships or ():
+            author = authorship.author
+            display_name = (authorship.raw_author_name or "").strip() or (
+                (author.display_name or "").strip() if author else ""
+            )
+            author_id = (
+                (author.id or "").strip().rstrip("/").rsplit("/", maxsplit=1)[-1] if author else ""
+            )
+            orcid = (author.orcid or "").strip() if author else ""
+            credits.append(
+                BibliographicCredit(
+                    display_name=display_name,
+                    provider_record_id=author_id or None,
+                    external_identifiers=(("orcid", orcid),) if orcid else (),
+                )
+            )
+        year = work.publication_year
+        if year is None and work.publication_date:
             try:
-                year = int(publication_date[:4])
+                year = int(work.publication_date[:4])
             except ValueError:
                 pass
         source = identified_source(
-            title=str(work.get("title") or "Untitled source"),
+            title=work.title or "",
             authors=(credit.display_name for credit in credits),
             year=year,
-            source_type=str(work.get("type") or "unknown"),
-            provenance=(SourceProvenance("openalex", work_id, retrieved_at),),
+            source_type=work.type or "unknown",
+            provenance=(SourceProvenance("openalex", work_id, datetime.now(UTC)),),
             identifiers=identifiers,
-            source_url=landing_url if isinstance(landing_url, str) else None,
+            source_url=work.primary_location.landing_page_url if work.primary_location else None,
         )
         return LiteratureRecord(source, tuple(credits))
 
@@ -242,50 +268,44 @@ class OpenAlexSemanticSearch(OpenAlexLiteratureSource):
         self._request_coordinator = request_coordinator or _DEFAULT_SEMANTIC_REQUEST_COORDINATOR
         self._retry_sleep = retry_sleep
 
-    async def search(self, query: LiteratureQuery) -> tuple[LiteratureRecord, ...]:
+    async def search(
+        self, query: LiteratureQuery, *, checkpoint: str | None = None
+    ) -> LiteratureBatch:
+        if checkpoint is not None:
+            raise LiteratureSourceError(
+                "semantic search has no continuation", error_type="invalid_checkpoint"
+            )
         if query.limit > self._maximum_results:
             raise ValueError(
                 f"OpenAlex semantic search supports at most {self._maximum_results} results"
             )
         if len(query.query) > OPENALEX_SEMANTIC_MAXIMUM_QUERY_CHARACTERS:
-            raise ValueError(
-                "OpenAlex semantic search input must be at most "
-                f"{OPENALEX_SEMANTIC_MAXIMUM_QUERY_CHARACTERS:,} characters"
-            )
+            raise ValueError("OpenAlex semantic search input must be at most 2,000 characters")
         return await super().search(query)
 
     async def _search(
-        self, client: httpx.AsyncClient, query: LiteratureQuery
-    ) -> tuple[LiteratureRecord, ...]:
-        reserved = {parameter.name for parameter in query.parameters} & self._reserved_parameters
+        self, client: httpx.AsyncClient, query: LiteratureQuery, checkpoint: str | None
+    ) -> LiteratureBatch:
+        reserved = {parameter.name for parameter in query.parameters} & (
+            self._reserved_parameters | {"page", "api_key"}
+        )
         if reserved:
-            raise ValueError(
-                f"OpenAlex semantic adapter manages reserved parameters: {sorted(reserved)}"
-            )
-        request_params = httpx.QueryParams(
-            {
-                "search.semantic": query.query,
-                "per_page": query.limit,
-                "select": self._select,
-            }
+            raise ValueError("OpenAlex semantic adapter manages reserved parameters")
+        params = httpx.QueryParams(
+            {"search.semantic": query.query, "per_page": query.limit, "select": self._select}
         )
         for parameter in query.parameters:
-            request_params = request_params.add(parameter.name, parameter.value)
-        headers = {"Authorization": f"Bearer {self._api_key}"} if self._api_key else None
+            params = params.add(parameter.name, parameter.value)
         response = await get_with_retries(
             client,
             f"{self.base_url}/works",
-            params=request_params,
-            headers=headers,
+            params=params,
+            headers={"Authorization": f"Bearer {self._api_key}"} if self._api_key else None,
             sleep=self._retry_sleep,
             before_request=self._request_coordinator.wait,
         )
-        payload = cast(Mapping[str, object], response.json())
-        results = payload.get("results", [])
-        if not isinstance(results, list):
-            raise ValueError("OpenAlex response results must be a list")
-        return tuple(
-            self._map_work(cast(Mapping[str, object], raw))
-            for raw in cast(list[object], results)[: query.limit]
-            if isinstance(raw, Mapping)
-        )
+        payload = parse_response(response, _Results)
+        if len(payload.results) > query.limit:
+            raise malformed()
+        records = tuple(self._map_work(work) for work in payload.results)
+        return LiteratureBatch(records, None, True)

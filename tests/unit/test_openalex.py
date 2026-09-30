@@ -10,8 +10,8 @@ from research_atlas.application.discovery import (
     serialize_report,
 )
 from research_atlas.application.ports.literature_source import (
+    LiteratureBatch,
     LiteratureQuery,
-    LiteratureRecord,
     LiteratureSearchRequest,
 )
 from research_atlas.domain.contributors import BibliographicCredit
@@ -112,7 +112,7 @@ def test_openalex_maps_mocked_work_and_retries_rate_limit() -> None:
                 )
             )
 
-    records = asyncio.run(run_search())
+    records = asyncio.run(run_search()).records
 
     assert calls == 2
     assert len(records) == 1
@@ -123,10 +123,12 @@ def test_openalex_maps_mocked_work_and_retries_rate_limit() -> None:
     assert record.year == 2022
     assert record.source_type == "article"
     assert record.source_url == "https://example.test/article"
-    assert ("doi", "10.1000/example") in {
+    assert ("doi", "https://doi.org/10.1000/EXAMPLE") in {
         (item.namespace, item.value) for item in record.external_identifiers
     }
-    assert ("pmid", "42") in {(item.namespace, item.value) for item in record.external_identifiers}
+    assert ("pmid", "https://pubmed.ncbi.nlm.nih.gov/42") in {
+        (item.namespace, item.value) for item in record.external_identifiers
+    }
     assert literature_record.credits == (
         BibliographicCredit(
             "A. Author",
@@ -220,7 +222,7 @@ def test_openalex_semantic_uses_exact_mode_forwards_parameters_and_preserves_ord
             },
         )
 
-    async def run_search() -> tuple[LiteratureRecord, ...]:
+    async def run_search() -> LiteratureBatch:
         clock = FakeMonotonicClock()
         async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
             source = OpenAlexSemanticSearch(
@@ -237,7 +239,7 @@ def test_openalex_semantic_uses_exact_mode_forwards_parameters_and_preserves_ord
                 )
             )
 
-    records = asyncio.run(run_search())
+    records = asyncio.run(run_search()).records
 
     assert calls == 1
     assert [record.source.title for record in records] == [
@@ -251,9 +253,9 @@ def test_openalex_semantic_uses_exact_mode_forwards_parameters_and_preserves_ord
     assert records[0].source.source_type == "article"
     assert records[0].source.source_url == "https://example.test/W3"
     assert {(item.namespace, item.value) for item in records[0].source.external_identifiers} == {
-        ("doi", "10.1000/w3"),
+        ("doi", "https://doi.org/10.1000/W3"),
         ("openalex", "W3"),
-        ("pmid", "3"),
+        ("pmid", "https://pubmed.ncbi.nlm.nih.gov/3"),
     }
 
 

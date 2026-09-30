@@ -1,68 +1,102 @@
 # Lean v1 architecture
 
-The independent architecture audit is the authority for this intervention. Stage 1 reduces the
-existing model; later stages build the actual evidence pipeline.
+The independent architecture audit remains the authority. Stage 1 removed speculative machinery;
+Stage 2 settles ingestion/provenance behavior and small content/evidence contracts. Persistence,
+content acquisition, extraction execution, synthesis generation, and frontend/API remain unbuilt.
 
-## Retained boundaries
+## Boundaries and retained records
 
-```text
-ResearchRequest: what the user asked and optional planning context
-ResearchRun: identity, project, original request, plan, lifecycle, timestamps
-SearchExecution: the actual provider operation, exact inputs, timing and outcome
-SourceDiscovery: how a Source entered a run
-Source: a publication with Atlas-owned identity
-Study: one study or separable analysis within a Source
-Finding: what that Study reported
-```
+ResearchRequest expresses user intent and optional planning. ResearchRun owns the original request,
+project and lifecycle. SearchExecution records actual provider/operation/query/parameters, per-batch
+limit, progress count, checkpoint, timing and safe errors. These are distinct from intended plans.
 
-These execution/evidence classes are data records; the dry-run does not populate durable research
-work. A small EvidenceAssessment value retains claim-to-finding links and uncertainty without a
-history graph. It is not a synthesis engine or a validated claim of support. The later Insight
-stage must establish a trustworthy synthesis boundary.
+LiteratureSource returns one LiteratureBatch per call. The application can collect an explicitly
+bounded number of batches. Provider response models remain private to adapters; native cursors
+are opaque outside them. Domain records are trusted dataclasses; provider/user boundaries validate
+external data. No provider, storage technology, consumer, or LLM framework governs the domain.
 
-Domain dataclasses represent trusted internal state. Pydantic validates user/project inputs;
-provider adapters isolate external formats and query semantics. No provider, consumer, storage
-technology, or LLM framework governs the domain.
+## Attributable observations and Source identity
 
-## Identity and bibliographic attribution
+LiteratureRecord is one metadata observation with a UUIDv7 observation_id, one provider publication
+provenance (provider, optional publication-record ID, required retrieval time), reported identifiers,
+complete ordered credits/byline and all display fields. Empty credit names retain an unnamed slot;
+contributors have no Atlas identity. Provider ORCID values remain unverified credit metadata.
 
-Sources use opaque Atlas UUIDv7 identities. Only explicitly trusted, normalized external keys
-and provider-qualified publication IDs support automatic matching. Similar titles or names are
-never matching authority. Conflicting strong identifiers fail explicitly.
+The embedded SourceRecord is a provisional candidate snapshot, not a persisted Source row. It is
+unchanged during reconciliation. resolved_source_id is separate and remains null for conflicts.
+Stage 3 persists the observation's fields and resolved FK, not the provisional candidate UUID.
 
-A LiteratureRecord holds one provider publication observation and its ordered BibliographicCredit
-values. Discovery retains every observation, remapping its Source ID after exact reconciliation
-while preserving the publication's metadata, provider provenance, and whole credit list. Credits
-have no Atlas UUIDs or cross-publication resolution. Supplied ORCID values are metadata only.
+Resolved Sources use Atlas UUIDv7 identity. Only trusted normalized external identifiers and
+provider-qualified publication keys drive exact matching. Unknown identifiers stay on observations;
+they are not promoted to authoritative Source identifiers. The original reported strings remain
+available even when normalized keys are used for matching. DOI/PMID/PMCID/arXiv conflicts quarantine
+the entire transitive component, including its otherwise unambiguous members. Other components
+survive. Conflict reports identify observation IDs and contradictory normalized namespace/values;
+conflicted memberships have no resolved Source ID. No fuzzy matching is performed.
 
-The merged display byline comes from the first nonempty observed byline; author strings are never
-unioned. Original metadata alternatives remain available. Other display-field selection remains
-provisional and is a Stage 2 concern.
+Display selection is deliberately simple: the FIRST observation in request order, then provider
+page/result order, supplies title, year, complete byline, type and URL together, including missing
+fields. Network completion order cannot change the choice. Source.display_observation_id identifies
+that exact observation. All alternatives are retained. Identifiers and provider provenance may be
+combined for identity/attribution, but display fields are never combined. Local repeated resolution
+of the same inputs is deterministic; newly fetched observations have new provisional UUIDs. Stored
+ID reuse and replay idempotency belong to the explicit Stage 3 rules.
 
-Source metadata provenance differs from discovery provenance. A provider supplying metadata need
-not be the mechanism that found the Source. Temporary search indices must not become durable keys.
+Metadata provenance and discovery provenance differ. An observation may come from a different
+provider than the search that found it. DiscoveryMembership records the actual search index, rank,
+observation ID and nullable resolved Source ID; resolved duplicates retain the first rank per
+search. Original duplicate observations are still available. Temporary indices are not durable IDs.
+Durable SourceDiscovery carries the required observation_id alongside its resolved Source, search/run,
+discovery time and rank. Conflicted observations do not produce a fake durable discovery.
 
-## Flexible information and downstream use
+## Content, extraction and evidence contracts
 
-Construct definitions, measurements, instruments, interventions, comparators, moderators, and
-quality judgments remain important scientific information. They do not require global identities
-or compulsory relationships. Their eventual structured extraction representation is not designed
-in Stage 1. Database identity and evidence links must remain relational when persistence is built.
+SourceDocument identifies one Source's content artifact/version, its kind, retrieval context/time,
+optional URL/media type, SHA-256 of the exact anchorable bytes, and usable/unavailable/failed/incomplete
+status. Usable content requires a checksum. Replacing bytes or the parsed representation creates a
+new document identity. A mutable remote URL is never an immutable content reference.
 
-Recommendations, design guidance, coding prompts, and reports are downstream interpretations of
-selected evidence. They must preserve attribution and qualifications. Optional consumer settings
-do not constrain evidence records or require a promotion lifecycle.
+Extraction identifies one attempt against that document ID, creating run, purpose, instruction plus
+configuration hash, tool/model names and versions when used, timing, lifecycle and validation/review
+outcomes. Accepted output requires passed validation and an explicit accepted/not-required review
+disposition. Failed and review-needed output cannot be selected as evidence. Re-extraction creates a
+new identity; finalized attempts remain immutable and addressable. Configuration hashes refer to
+retained exact instruction/configuration bytes, not a protocol registry.
 
-## Removed commitments
+RunSource.select_extraction explicitly selects at most one accepted extraction of a usable document
+for that Source. It can reuse an accepted result from another creating run. Replacing this selection
+does not destroy earlier attempts. Active run evidence reads traverse the selected extraction, so
+repeated execution alone cannot inflate the number of independent studies.
 
-Stage 1 removes contributor resolution, global ontology entities, aggregate snapshot persistence,
-static export-bundle machinery, compulsory protocol/taxonomy coupling, formal run approval, and
-supersession traversal. ADRs 0003-0005 remain historical records, superseded by this intervention.
-Semantic Scholar and Zotero are deferred; OpenAlex and optional Crossref remain supported.
+RunSource also records current run-specific processing_state: discovered, retrieved, extracted,
+excluded, unavailable or failed. This is separate from provider/search outcomes. State is explicit;
+select_extraction does not rewrite it, and a later failure may retain earlier accepted evidence.
+Current ScreeningDecision data maps to screening state/reasons on run_sources, without a separate
+screening history table. See the persistence boundary for source-level versus study-scoped screening.
 
-## Explicit next work
+StudyRecord has an explicit extraction_id. FindingRecord references its Study and requires at least
+one EvidenceAnchor: exact passage and/or plain-text locator in that extraction's document. Page
+numbers are optional; sections/tables are ordinary locator text. Stage 3 must enforce consistent
+Source/Extraction/Study links, not infer them from the prose in RecordProvenance.
 
-Stage 2 must address malformed/partial provider results, pagination checkpoints, conflict
-isolation, and improved metadata attribution. Later stages must add persistence, identifiable
-paper content, validated extractions with exact evidence anchors, evidence-linked Insights,
-frontend drill-down, and useful output rendering. No replacement framework is introduced here.
+Insight replaces the temporary assessment record. Each Insight is one claim with producing run,
+qualifications, uncertainty/generalizability and reproducible synthesis configuration/provenance.
+InsightFinding is an explicit supporting/contradicting/contextual decision with rationale. Finding
+nullness or statistical direction never chooses that relationship. These records do not generate
+claims or validate empirical support; accepted evidence links require validation at future execution
+and persistence boundaries.
+
+## Flexible detail and downstream outputs
+
+Study/Finding details are structured mappings for scientific information, eventually controlled
+JSONB validated by the extraction boundary. Constructs, instruments, interventions, comparators,
+moderators and outcomes do not gain global identities. Trusted dataclasses are not probabilistic
+output validators and do not deeply freeze nested mappings. Persisted finalized evidence must be
+immutable. Recommendations, design guidance, prompts and reports remain downstream renderings.
+
+Stage 1 deletions remain in force. Semantic Scholar and Zotero remain deferred. No replacement
+snapshot/export aggregate, identity ontology, protocol/version registry, or worker framework exists.
+ADRs 0001/0002 remain central; ADRs 0003-0005 remain superseded history.
+
+See [provider behavior](providers.md), [lifecycle](research-lifecycle.md), and the
+[Stage 3 persistence boundary](persistence-boundary.md) for transactions, uniqueness and query paths.

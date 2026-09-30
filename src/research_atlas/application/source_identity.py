@@ -1,6 +1,7 @@
 """Provider-independent scholarly source identity and exact merging."""
 
 import re
+from collections import Counter
 from collections.abc import Iterable
 from dataclasses import dataclass, replace
 from typing import Literal
@@ -25,7 +26,7 @@ _NAMESPACE_ALIASES = {
 }
 
 # These namespaces are explicitly authorized as unique publication/source identifiers for
-# automatic matching. Unknown identifiers remain normalized metadata but are not match authority.
+# automatic matching. Unknown identifiers stay on observations and are not match authority.
 TRUSTED_EXACT_IDENTIFIER_NAMESPACES = frozenset(
     {
         "acl",
@@ -52,20 +53,19 @@ class ExactSourceKey:
 
 @dataclass(frozen=True, slots=True)
 class ExactSourceResolution:
-    """Merged sources plus the final source ID corresponding to each input record."""
+    """Resolved sources, nullable input mapping, and quarantined exact components."""
 
     sources: tuple[SourceRecord, ...]
-    source_ids_by_input: tuple[UUID, ...]
+    source_ids_by_input: tuple[UUID | None, ...]
+    conflicts: tuple[SourceIdentityConflict, ...] = ()
 
 
-class SourceIdentityConflictError(ValueError):
-    """Raised when an exact identity component contains contradictory strong identifiers."""
+@dataclass(frozen=True, slots=True)
+class SourceIdentityConflict:
+    """One quarantined exact component; indices refer to the ordered input observations."""
 
-    def __init__(self, namespace: str, values: Iterable[str]) -> None:
-        self.namespace = namespace
-        self.values = tuple(sorted(set(values)))
-        rendered_values = ", ".join(repr(value) for value in self.values)
-        super().__init__(f"conflicting exact source identity for {namespace}: {rendered_values}")
+    input_indices: tuple[int, ...]
+    conflicting_identifiers: tuple[ExternalIdentifier, ...]
 
 
 def normalize_doi(value: str) -> str:
@@ -107,6 +107,10 @@ def normalize_identifier(namespace: str, value: str) -> ExternalIdentifier:
         )
         normalized_value = re.sub(r"\.pdf$", "", normalized_value, flags=re.I)
         normalized_value = re.sub(r"v\d+$", "", normalized_value, flags=re.I).lower()
+    elif normalized_namespace == "openalex":
+        normalized_value = re.sub(
+            r"^https?://openalex\.org/", "", normalized_value, flags=re.I
+        ).rstrip("/")
     return ExternalIdentifier(namespace=normalized_namespace, value=normalized_value)
 
 
@@ -159,11 +163,11 @@ def identified_source(
     return SourceRecord(
         source_id=uuid7(),
         title=title.strip(),
-        authors=tuple(author.strip() for author in authors if author.strip()),
+        authors=tuple(author.strip() for author in authors),
         year=year,
         source_type=source_type.strip().lower() or "unknown",
         provider_provenance=_merge_provenance(provenance),
-        external_identifiers=normalize_identifiers(identifiers),
+        external_identifiers=tuple(identifiers),
         source_url=source_url.strip() if source_url and source_url.strip() else None,
     )
 
@@ -182,48 +186,33 @@ def _merge_provenance(items: Iterable[SourceProvenance]) -> tuple[SourceProvenan
     return tuple(by_key[key] for key in sorted(by_key))
 
 
-def _preferred_text(values: Iterable[str | None], fallback: str | None = None) -> str | None:
-    present = {value.strip() for value in values if value and value.strip()}
-    if not present:
-        return fallback
-    return sorted(present, key=lambda value: (-len(value), value.casefold(), value))[0]
-
-
-def _raise_for_identity_conflicts(records: Iterable[SourceRecord]) -> None:
-    values_by_namespace: dict[str, set[str]] = {
-        namespace: set() for namespace in _CONFLICTING_IDENTIFIER_NAMESPACES
-    }
-    for record in records:
-        for identifier in normalize_identifiers(record.external_identifiers):
-            if identifier.namespace in values_by_namespace:
-                values_by_namespace[identifier.namespace].add(identifier.value)
-    for namespace in sorted(values_by_namespace):
-        values = values_by_namespace[namespace]
-        if len(values) > 1:
-            raise SourceIdentityConflictError(namespace, values)
-
-
-def _merge_component(records: tuple[SourceRecord, ...]) -> SourceRecord:
-    _raise_for_identity_conflicts(records)
+def _conflicting_identifiers(records: Iterable[SourceRecord]) -> tuple[ExternalIdentifier, ...]:
     identifiers = normalize_identifiers(
         identifier for record in records for identifier in record.external_identifiers
     )
-    provenance = _merge_provenance(
-        item for record in records for item in record.provider_provenance
+    counts = Counter(item.namespace for item in identifiers)
+    return tuple(
+        item
+        for item in identifiers
+        if item.namespace in _CONFLICTING_IDENTIFIER_NAMESPACES and counts[item.namespace] > 1
     )
-    # Choose a whole observed byline. Unioning names can invent extra authors.
-    authors = next((record.authors for record in records if record.authors), ())
-    years = [record.year for record in records if record.year is not None]
-    return SourceRecord(
-        source_id=records[0].source_id,
-        title=_preferred_text((record.title for record in records), "") or "",
-        authors=authors,
-        year=min(years) if years else None,
-        source_type=_preferred_text((record.source_type for record in records), "unknown")
-        or "unknown",
-        provider_provenance=provenance,
-        external_identifiers=identifiers,
-        source_url=_preferred_text(record.source_url for record in records),
+
+
+def _merge_component(records: tuple[SourceRecord, ...]) -> SourceRecord:
+    # First observation in caller order supplies ALL display fields, even missing ones.
+    # Only conflict-free trusted identifiers are promoted to the resolved Source.
+    return replace(
+        records[0],
+        provider_provenance=_merge_provenance(
+            item for record in records for item in record.provider_provenance
+        ),
+        external_identifiers=tuple(
+            item
+            for item in normalize_identifiers(
+                identifier for record in records for identifier in record.external_identifiers
+            )
+            if item.namespace in TRUSTED_EXACT_IDENTIFIER_NAMESPACES
+        ),
     )
 
 
@@ -259,23 +248,19 @@ def resolve_exact_sources(records: Iterable[SourceRecord]) -> ExactSourceResolut
 
     merged_sources: list[SourceRecord] = []
     source_ids_by_input: list[UUID | None] = [None] * len(candidates)
+    conflicts: list[SourceIdentityConflict] = []
     for indices in component_indices.values():
-        merged = _merge_component(tuple(candidates[index] for index in indices))
+        component = tuple(candidates[index] for index in indices)
+        if contradictory := _conflicting_identifiers(component):
+            conflicts.append(SourceIdentityConflict(tuple(indices), contradictory))
+            continue
+        merged = _merge_component(component)
         merged_sources.append(merged)
         for index in indices:
             source_ids_by_input[index] = merged.source_id
 
-    if any(source_id is None for source_id in source_ids_by_input):
-        raise RuntimeError("exact source resolution did not map every input record")
     return ExactSourceResolution(
         sources=tuple(merged_sources),
-        source_ids_by_input=tuple(
-            source_id for source_id in source_ids_by_input if source_id is not None
-        ),
+        source_ids_by_input=tuple(source_ids_by_input),
+        conflicts=tuple(conflicts),
     )
-
-
-def merge_sources(records: Iterable[SourceRecord]) -> tuple[SourceRecord, ...]:
-    """Merge only transitively connected exact keys; titles never participate."""
-
-    return resolve_exact_sources(records).sources

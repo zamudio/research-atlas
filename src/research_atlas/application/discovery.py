@@ -3,6 +3,7 @@
 import asyncio
 from collections.abc import Sequence
 from dataclasses import asdict, dataclass, replace
+from typing import Literal
 from uuid import UUID
 
 from research_atlas.application.ports.literature_source import (
@@ -10,7 +11,7 @@ from research_atlas.application.ports.literature_source import (
     LiteratureSearchRequest,
     LiteratureSourceError,
 )
-from research_atlas.application.source_identity import resolve_exact_sources
+from research_atlas.application.source_identity import SourceIdentityConflict, resolve_exact_sources
 from research_atlas.domain.execution import SearchParameter
 from research_atlas.domain.studies import SourceRecord
 
@@ -21,8 +22,10 @@ class ProviderOutcome:
 
     provider: str
     operation: str
-    success: bool
-    raw_result_count: int | None = None
+    status: Literal["succeeded", "partial", "failed"]
+    raw_result_count: int = 0
+    completed_batches: int = 0
+    checkpoint: str | None = None
     error_type: str | None = None
     status_code: int | None = None
     error_message: str | None = None
@@ -37,6 +40,8 @@ class SearchSummary:
     query: str
     limit: int
     parameters: tuple[SearchParameter, ...]
+    checkpoint: str | None
+    max_batches: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -44,7 +49,8 @@ class DiscoveryMembership:
     """Temporary link from one requested search result to its merged source."""
 
     search_index: int
-    source_id: UUID
+    source_id: UUID | None
+    observation_id: UUID
     result_position: int
     provider_record_id: str | None = None
 
@@ -58,10 +64,11 @@ class DiscoveryReport:
     provider_outcomes: tuple[ProviderOutcome, ...]
     memberships: tuple[DiscoveryMembership, ...] = ()
     metadata_observations: tuple[LiteratureRecord, ...] = ()
+    identity_conflicts: tuple[SourceIdentityConflict, ...] = ()
 
 
 class DiscoveryFailedError(RuntimeError):
-    """Raised when no configured provider completed successfully."""
+    """Raised when every operation failed before returning a validated batch."""
 
     def __init__(self, report: DiscoveryReport) -> None:
         self.report = report
@@ -73,6 +80,7 @@ class DiscoveryFailedError(RuntimeError):
 class _ProviderSearchResult:
     outcome: ProviderOutcome
     records: tuple[LiteratureRecord, ...]
+    positions: tuple[int, ...]
 
 
 class DiscoverSources:
@@ -96,12 +104,14 @@ class DiscoverSources:
                 query=search.query.query,
                 limit=search.query.limit,
                 parameters=search.query.parameters,
+                checkpoint=search.checkpoint,
+                max_batches=search.max_batches,
             )
             for search in self._searches
         )
         outcomes = tuple(result.outcome for result in results)
         discovered = tuple(record for result in results for record in result.records)
-        if not any(outcome.success for outcome in outcomes):
+        if all(outcome.status == "failed" for outcome in outcomes):
             raise DiscoveryFailedError(
                 DiscoveryReport(
                     searches=summaries,
@@ -109,11 +119,14 @@ class DiscoverSources:
                     provider_outcomes=outcomes,
                 )
             )
-        resolution = resolve_exact_sources(record.source for record in discovered)
+        resolution = resolve_exact_sources(
+            replace(record.source, display_observation_id=record.observation_id)
+            for record in discovered
+        )
         metadata_observations = tuple(
             replace(
                 record,
-                source=replace(record.source, source_id=resolution.source_ids_by_input[index]),
+                resolved_source_id=resolution.source_ids_by_input[index],
             )
             for index, record in enumerate(discovered)
         )
@@ -121,16 +134,20 @@ class DiscoverSources:
         input_index = 0
         for search_index, (search, result) in enumerate(zip(self._searches, results, strict=True)):
             seen_source_ids: set[UUID] = set()
-            for result_position, literature_record in enumerate(result.records, start=1):
+            for result_position, literature_record in zip(
+                result.positions, result.records, strict=True
+            ):
                 source_id = resolution.source_ids_by_input[input_index]
                 input_index += 1
-                if source_id in seen_source_ids:
+                if source_id is not None and source_id in seen_source_ids:
                     continue
-                seen_source_ids.add(source_id)
+                if source_id is not None:
+                    seen_source_ids.add(source_id)
                 memberships.append(
                     DiscoveryMembership(
                         search_index=search_index,
                         source_id=source_id,
+                        observation_id=literature_record.observation_id,
                         result_position=result_position,
                         provider_record_id=_provider_record_id(
                             literature_record.source, search.source.provider_id
@@ -143,40 +160,73 @@ class DiscoverSources:
             provider_outcomes=outcomes,
             memberships=tuple(memberships),
             metadata_observations=metadata_observations,
+            identity_conflicts=resolution.conflicts,
         )
 
     @staticmethod
     async def _search_provider(
         search: LiteratureSearchRequest,
     ) -> _ProviderSearchResult:
+        records: list[LiteratureRecord] = []
+        positions: list[int] = []
+        checkpoint = search.checkpoint
+        completed_batches = 0
         try:
-            records = await search.source.search(search.query)
+            for _ in range(search.max_batches):
+                batch = await search.source.search(search.query, checkpoint=checkpoint)
+                if len(batch.records) > search.query.limit:
+                    raise LiteratureSourceError(
+                        "provider exceeded batch limit", error_type="malformed_response"
+                    )
+                if completed_batches and batch.start_position != positions[-1]:
+                    raise LiteratureSourceError(
+                        "provider returned discontinuous batch", error_type="malformed_response"
+                    )
+                if not batch.exhausted and batch.next_checkpoint == checkpoint:
+                    raise LiteratureSourceError(
+                        "provider checkpoint did not advance", error_type="malformed_response"
+                    )
+                records.extend(batch.records)
+                positions.extend(
+                    range(batch.start_position + 1, batch.start_position + len(batch.records) + 1)
+                )
+                checkpoint = batch.next_checkpoint
+                completed_batches += 1
+                if batch.exhausted:
+                    break
         except Exception as error:
-            if isinstance(error, LiteratureSourceError):
-                error_type = error.error_type
-                status_code = error.status_code
-            else:
-                error_type = type(error).__name__
-                status_code = None
             return _ProviderSearchResult(
                 ProviderOutcome(
                     provider=search.source.provider_id,
                     operation=search.source.operation_id,
-                    success=False,
-                    error_type=error_type,
-                    status_code=status_code,
-                    error_message=str(error),
+                    status="partial" if completed_batches else "failed",
+                    raw_result_count=len(records),
+                    completed_batches=completed_batches,
+                    checkpoint=checkpoint,
+                    error_type=error.error_type
+                    if isinstance(error, LiteratureSourceError)
+                    else type(error).__name__,
+                    status_code=error.status_code
+                    if isinstance(error, LiteratureSourceError)
+                    else None,
+                    error_message=str(error)
+                    if isinstance(error, LiteratureSourceError)
+                    else "provider operation failed",
                 ),
-                (),
+                tuple(records),
+                tuple(positions),
             )
         return _ProviderSearchResult(
             ProviderOutcome(
                 provider=search.source.provider_id,
                 operation=search.source.operation_id,
-                success=True,
+                status="succeeded" if checkpoint is None else "partial",
                 raw_result_count=len(records),
+                completed_batches=completed_batches,
+                checkpoint=checkpoint,
             ),
-            records,
+            tuple(records),
+            tuple(positions),
         )
 
 
@@ -205,6 +255,9 @@ def serialize_source(record: SourceRecord) -> dict[str, object]:
     providers = {item.provider for item in record.provider_provenance}
     return {
         "source_id": str(record.source_id),
+        "display_observation_id": str(record.display_observation_id)
+        if record.display_observation_id
+        else None,
         "title": record.title,
         "authors": list(record.authors),
         "year": record.year,
@@ -235,9 +288,31 @@ def serialize_report(report: DiscoveryReport) -> dict[str, object]:
             for source in report.sources
         ),
         "sources": [serialize_source(source) for source in report.sources],
+        "memberships": [
+            {
+                **asdict(item),
+                "source_id": str(item.source_id) if item.source_id else None,
+                "observation_id": str(item.observation_id),
+            }
+            for item in report.memberships
+        ],
+        "identity_conflicts": [
+            {
+                "observation_ids": [
+                    str(report.metadata_observations[i].observation_id)
+                    for i in conflict.input_indices
+                ],
+                "conflicting_identifiers": [
+                    asdict(item) for item in conflict.conflicting_identifiers
+                ],
+            }
+            for conflict in report.identity_conflicts
+        ],
         "metadata_observations": [
             {
                 **serialize_source(record.source),
+                "source_id": str(record.resolved_source_id) if record.resolved_source_id else None,
+                "observation_id": str(record.observation_id),
                 "credits": [asdict(credit) for credit in record.credits],
             }
             for record in report.metadata_observations

@@ -1,27 +1,29 @@
 # Metadata dry-run CLI
 
-The CLI is a small developer diagnostic. It searches and reconciles metadata without creating a
-ResearchRun, retrieving paper content, extracting evidence, or invoking an LLM. Run 001 remains
-unexecuted.
+The CLI exercises supported discovery operations without persisting a ResearchRun or processing
+paper content. Run 001 remains UNEXECUTED.
 
 ```shell
-uv run research-atlas-dry-run "urban heat mitigation" --limit 8
+uv run research-atlas-dry-run "urban heat mitigation" --limit 8 --batches 2
 uv run research-atlas-dry-run "urban heat mitigation" --limit 5 --openalex-semantic "How does urban heat affect health?"
 uv run research-atlas-dry-run "urban heat mitigation" --limit 5 --crossref-bibliographic "urban heat mitigation systematic review"
 ```
 
-The positional query selects `openalex.search`. Optional flags add `openalex.semantic` and
-`crossref.works` with their exact supplied queries. Limits apply per operation; query syntax is
-not portable between providers. The diagnostic restricts limits to 1-10 results per operation.
+The positional query selects openalex.search. Optional flags add openalex.semantic and crossref.works
+with their exact supplied queries. --limit is records per batch (1-10 for this diagnostic); --batches
+is maximum batches per operation (1-10, default 1). Semantic search always returns a single bounded
+set. A lexical search with a continuation at the budget boundary is explicitly partial.
 
-JSON stdout includes requested searches, provider outcomes, reconciled Sources, and the original
-metadata observations with ordered credits. Each observation retains its provider publication
-provenance and references the reconciled Source ID. This is diagnostic JSON, not a versioned
-research export contract. Temporary search memberships remain in the application report.
+JSON includes exact inputs/budgets, provider outcomes and retry checkpoints, resolved Sources,
+whole metadata observations with observation IDs/credits, selected display observation IDs,
+ranked memberships, and identity conflicts. Conflicted observations have null resolved Source IDs.
+This is diagnostic JSON, not an export contract. Checkpoints are opaque adapter data: applications
+can resume via LiteratureSearchRequest with the same query and checkpoint; the CLI does not save
+or resume durable execution state.
 
-Use `--output tmp/dry-run.json` for an optional copy. If every operation fails, stdout still contains
-a JSON report, stderr explains the failure, and the exit code is nonzero. A successful empty
-operation is reported as such.
+--output tmp/dry-run.json writes an optional copy. All-operation failure emits JSON stdout, safe
+explanation on stderr and exit code 1. Partial or conflict-bearing reports retain usable data and
+exit 0; consumers must inspect their explicit statuses/conflict list before claiming completeness.
 
-Configuration is limited to `RESEARCH_ATLAS_OPENALEX_API_KEY` and optional
-`RESEARCH_ATLAS_CROSSREF_MAILTO`. See [provider limitations](providers.md) before interpreting results.
+Configuration remains RESEARCH_ATLAS_OPENALEX_API_KEY and optional RESEARCH_ATLAS_CROSSREF_MAILTO.
+See [provider semantics](providers.md) and [architecture](architecture.md).

@@ -4,14 +4,18 @@ import pytest
 
 from research_atlas.application.source_identity import (
     ExactSourceKey,
-    SourceIdentityConflictError,
     exact_source_match_keys,
     identified_source,
-    merge_sources,
     normalize_doi,
     resolve_exact_sources,
 )
 from research_atlas.domain.studies import ExternalIdentifier, SourceProvenance, SourceRecord
+
+
+def resolved(records: tuple[SourceRecord, ...]) -> tuple[SourceRecord, ...]:
+    result = resolve_exact_sources(records)
+    assert not result.conflicts
+    return result.sources
 
 
 @pytest.mark.parametrize(
@@ -93,7 +97,7 @@ def test_same_normalized_doi_merges_different_uuid7_candidates() -> None:
         identifiers=(ExternalIdentifier("DOI", "10.1/shared"),),
     )
 
-    merged = merge_sources((first, second))
+    merged = resolved((first, second))
 
     assert len(merged) == 1
     assert merged[0].source_id == first.source_id
@@ -107,7 +111,7 @@ def test_same_provider_record_merges_when_one_candidate_lacks_doi() -> None:
     )
     provider_only = _source("openalex", "W123", title="Updated metadata title")
 
-    merged = merge_sources((identified, provider_only))
+    merged = resolved((identified, provider_only))
 
     assert len(merged) == 1
     assert ExternalIdentifier("doi", "10.1/shared") in merged[0].external_identifiers
@@ -125,7 +129,7 @@ def test_cross_provider_candidates_with_same_doi_merge() -> None:
         identifiers=(ExternalIdentifier("DOI", "10.1/SHARED"),),
     )
 
-    merged = merge_sources((openalex, semantic))
+    merged = resolved((openalex, semantic))
 
     assert len(merged) == 1
     assert {item.provider for item in merged[0].provider_provenance} == {
@@ -165,8 +169,8 @@ def test_merge_preserves_first_seen_candidate_source_id() -> None:
         identifiers=(ExternalIdentifier("doi", "10.1/shared"),),
     )
 
-    assert merge_sources((first, second))[0].source_id == first.source_id
-    assert merge_sources((second, first))[0].source_id == second.source_id
+    assert resolved((first, second))[0].source_id == first.source_id
+    assert resolved((second, first))[0].source_id == second.source_id
 
 
 @pytest.mark.parametrize(
@@ -194,11 +198,13 @@ def test_conflicting_strong_identifiers_fail_explicitly(
         identifiers=(ExternalIdentifier(namespace, second_value),),
     )
 
-    with pytest.raises(SourceIdentityConflictError) as error:
-        merge_sources((first, second))
-
-    assert error.value.namespace == namespace
-    assert error.value.values == tuple(sorted((first_value, second_value)))
+    resolution = resolve_exact_sources((first, second))
+    assert resolution.sources == ()
+    assert resolution.source_ids_by_input == (None, None)
+    assert resolution.conflicts[0].input_indices == (0, 1)
+    assert resolution.conflicts[0].conflicting_identifiers == tuple(
+        ExternalIdentifier(namespace, value) for value in sorted((first_value, second_value))
+    )
 
 
 def test_unknown_identifier_namespace_is_not_automatic_match_authority() -> None:
@@ -213,7 +219,7 @@ def test_unknown_identifier_namespace_is_not_automatic_match_authority() -> None
         identifiers=(ExternalIdentifier("future_registry", "shared"),),
     )
 
-    assert len(merge_sources((first, second))) == 2
+    assert len(resolved((first, second))) == 2
 
 
 @pytest.mark.parametrize(
@@ -260,7 +266,7 @@ def test_titles_authors_and_years_without_exact_keys_do_not_merge() -> None:
         year=2024,
     )
 
-    assert len(merge_sources((first, second))) == 2
+    assert len(resolved((first, second))) == 2
 
 
 def test_merging_never_combines_different_provider_bylines() -> None:
@@ -277,11 +283,11 @@ def test_merging_never_combines_different_provider_bylines() -> None:
         identifiers=(ExternalIdentifier("doi", "10.1/shared"),),
     )
 
-    assert merge_sources((first, second))[0].authors == first.authors
-    assert merge_sources((second, first))[0].authors == second.authors
+    assert resolved((first, second))[0].authors == first.authors
+    assert resolved((second, first))[0].authors == second.authors
 
 
-def test_empty_byline_can_use_one_complete_provider_byline() -> None:
+def test_empty_display_byline_is_not_filled_from_another_observation() -> None:
     first = _source(
         "openalex", "W1", authors=(), identifiers=(ExternalIdentifier("doi", "10.1/shared"),)
     )
@@ -292,4 +298,47 @@ def test_empty_byline_can_use_one_complete_provider_byline() -> None:
         identifiers=(ExternalIdentifier("doi", "10.1/shared"),),
     )
 
-    assert merge_sources((first, second))[0].authors == second.authors
+    assert resolved((first, second))[0].authors == ()
+
+
+def test_conflicted_transitive_component_does_not_discard_unrelated_or_keyless_sources() -> None:
+    first = _source(
+        "one",
+        "1",
+        identifiers=(ExternalIdentifier("doi", "10.1/shared"), ExternalIdentifier("pmid", "1")),
+    )
+    bridge = _source("two", "2", identifiers=(ExternalIdentifier("doi", "10.1/shared"),))
+    last = _source("two", "2", identifiers=(ExternalIdentifier("pmid", "2"),))
+    valid = _source("three", "3", identifiers=(ExternalIdentifier("doi", "10.1/valid"),))
+    keyless = _source("four", None)
+    inputs = (first, bridge, valid, last, keyless)
+    result = resolve_exact_sources(inputs)
+    assert result == resolve_exact_sources(inputs)
+    assert [item.source_id for item in result.sources] == [valid.source_id, keyless.source_id]
+    assert result.source_ids_by_input == (None, None, valid.source_id, None, keyless.source_id)
+    assert result.conflicts[0].input_indices == (0, 1, 3)
+
+
+def test_unknown_reported_identifiers_are_not_promoted_to_resolved_source() -> None:
+    candidate = _source(
+        "one", "1", identifiers=(ExternalIdentifier("future_registry", "raw VALUE"),)
+    )
+    assert resolved((candidate,))[0].external_identifiers == ()
+    assert candidate.external_identifiers == (ExternalIdentifier("future_registry", "raw VALUE"),)
+
+
+@pytest.mark.parametrize(
+    ("namespace", "raw", "expected"),
+    [
+        ("pubmed", "https://pubmed.ncbi.nlm.nih.gov/123/", "123"),
+        ("pmc", "https://www.ncbi.nlm.nih.gov/pmc/articles/PMC42/", "PMC42"),
+        ("arxiv", "https://arxiv.org/pdf/2401.01234v2.pdf", "2401.01234"),
+        ("openalex", "https://openalex.org/W42", "W42"),
+    ],
+)
+def test_identifier_normalization_preserves_reported_value(
+    namespace: str, raw: str, expected: str
+) -> None:
+    source = _source("one", None, identifiers=(ExternalIdentifier(namespace, raw),))
+    assert next(iter(exact_source_match_keys(source))).value == expected
+    assert source.external_identifiers[0].value == raw

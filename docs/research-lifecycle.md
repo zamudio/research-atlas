@@ -1,43 +1,70 @@
 # Research lifecycle
 
-## Ask and plan
+ResearchRequest captures what the user asked and optional planning context. ResearchRun owns the
+project, original request, lifecycle and timestamps. SearchExecution records what actually ran.
+The current diagnostic does not instantiate/persist these execution records. Run 001 is UNEXECUTED.
 
-A ResearchRequest needs only a nonblank question. Subquestions, constraints, plan notes, and
-expected outputs are optional. Loading request YAML does not approve or execute research.
-ProjectProfile supplies project identity and optional research context.
+## Discovery and progress
 
-ResearchRun retains the original request and planning information with project ownership,
-lifecycle state, and timestamps. Intent can differ from execution; an evolving plan must not
-rewrite what actually happened.
+Fetch one validated bounded LiteratureBatch using the previous checkpoint. Preserve observations,
+resolve exact components, and retain conflict cases without inventing resolved Source IDs. A future
+transaction must commit those results together with the next checkpoint. Only then fetch another
+page. In-memory DiscoverSources reports bounded succeeded/partial/failed outcomes today.
 
-## Discover
+SearchExecution's requested_limit is the per-batch limit. completed_batches and provider_result_count
+are durable cumulative progress in Stage 3; the diagnostic reports counts for its invocation only.
+A partial status pauses an incomplete execution with checkpoint and optional safe error metadata.
+completed_at on partial records marks the end of that invocation, not exhaustion of the search;
+resuming the same logical search sets running and clears that time. Exact inputs never change.
 
-The implemented DiscoverSources use case executes explicit provider operations and preserves
-exact query text, parameters, limits, outcomes, and temporary memberships. It retains provider
-publication observations alongside reconciled Sources. One provider failure does not erase another
-provider's results. A successful empty response and an explicit provider failure are distinct.
+RunSource.processing_state independently records discovered, retrieved, extracted, excluded,
+unavailable or failed coverage for each run/Source. Current screening state and reasons come from
+ScreeningDecision values on that membership, not a screening history table. Future progress reads
+combine indexed search outcomes and membership states; a successful search does not imply that its
+Sources were retrieved or extracted. State updates are explicit and do not clear accepted selections.
 
-The CLI is metadata-only. It creates neither ResearchRun nor SearchExecution nor SourceDiscovery.
-For future durable execution, SearchExecution records actual inputs/outcomes and SourceDiscovery
-links Sources to those executions. Search indices are temporary in-memory coordinates.
+## Content and extraction
 
-## Screen and extract: future workflow
+SourceDocument identifies an immutable version of anchorable content with Source, kind, checksum,
+retrieval context/time and usability status. A changed parsed text or payload is a new version.
+Extraction records one attempt against exactly that version, creating run, purpose, configuration
+hash, tools/models, timing and validation/review outcome. These are contracts, not download/extraction
+services. Instruction and configuration bytes must be retained alongside their hash in Stage 3.
 
-ScreeningDecision represents run-specific eligibility, including uncertainty, rationale, and an
-optional Study subject. It has no supersession graph. Source and Study remain distinct: a paper
-can contain several studies. FindingRecord retains reported results, uncertainty, limitations,
-and subgroup notes without global measurement or intervention identities.
+Queued/running attempts are distinct from accepted, review_needed, failed and rejected results.
+Finalized attempts cannot be overwritten. A rerun creates a new extraction identity even if its
+inputs/configuration match. Review acceptance requires validated output; failed/review-needed
+attempts cannot become selected run evidence merely because output exists.
 
-The repository does not yet retrieve paper content or extract these records. Missing content,
-ambiguous extraction, and absent measurements must never be silently filled in. Future validated
-extractions must reference the exact document and passage supporting each result.
+A RunSource can explicitly select one accepted extraction for a Source. Selection does not combine
+all extraction attempts. StudyRecord.extraction_id owns the study set; FindingRecord.source_study_id
+owns each result, with an exact passage and/or locator in the document selected by that extraction.
+No page number is mandatory. Source and Study remain different entities.
 
-## Synthesize and use: future workflow
+## Synthesis and use
 
-Cross-study synthesis must distinguish reported Findings from Atlas Insights, preserve contrary
-and null evidence, and explain the evidence selected. Existing assessment data alone does not
-establish truth or enforce complete evidence chains.
+Insight is one cross-finding claim, with producing run and synthesis configuration/provenance.
+InsightFinding records supporting, contradicting or contextual relationships with an explicit
+rationale. Null/uncertain is a Finding property, not an evidence-link role. A positive result does
+not automatically support a claim; nonsignificance does not automatically contradict one.
 
-Useful outputs will render selected Insights for a purpose while retaining citations and
-qualifications. No application promotion ontology or export framework is required to begin this
-work. Finalized evidence must remain reproducible when future correction behavior is implemented.
+Once an Insight references a Finding, later extraction selection changes cannot silently redirect
+that link to newer evidence. Old finalized extraction content remains available for drill-down.
+Generated summaries, recommendations, reports and coding prompts are downstream renderings of
+selected Insights and their qualifications; no application promotion ontology is required.
+
+## Acceptance examples
+
+Executable cases are in test_source_identity.py, test_discovery.py, test_batches.py and
+test_evidence_contracts.py under tests/unit:
+
+- A: DOI-connected records with contradictory strong IDs are quarantined; an unrelated Source survives.
+- B: providers disagree on title/year/byline; the first entire observation is displayed and identified.
+- C: pages 1/2 succeed and page 3 fails; partial data survives and replay requests page 3 again.
+- D: HTTP 200 with {} or malformed items/meta/message is a provider failure, never empty success.
+- E: extracting one document twice creates two immutable identities; a run explicitly selects one.
+- F: Finding -> Study -> Extraction -> exact SourceDocument, with passage/locator anchoring.
+- G: null results receive relationship roles only through explicit appraisal decisions.
+
+[Stage 3 persistence semantics](persistence-boundary.md) defines the required constraints and read
+paths. No whole-project hydration or unbounded history traversal is part of these contracts.

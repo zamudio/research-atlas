@@ -3,10 +3,11 @@
 Research Atlas separates research intent, actual execution, reported findings, and downstream
 interpretation. The current executable workflow is metadata discovery.
 
-- [Architecture](architecture.md): lean v1 boundaries and Stage 1 limits.
+- [Architecture](architecture.md): lean v1 boundaries and Stage 2 contracts.
 - [Lifecycle](research-lifecycle.md): user request through future evidence-backed output.
 - [Identifiers](architecture/naming-and-identifiers.md): Source, provider, and execution identity.
 - [Providers](providers.md): OpenAlex and optional Crossref behavior.
+- [Persistence boundary](persistence-boundary.md): Stage 3 identity, idempotency, transactions and reads.
 - [CLI](cli.md): metadata-only developer diagnostic.
 - [ADR register](adr/README.md): retained decisions and explicitly superseded history.
 - [Project examples](../projects/README.md): optional project and request data.

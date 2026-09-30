@@ -1,37 +1,35 @@
 # Research Atlas
 
 Research Atlas is being built to research a question, discover publications, extract study
-findings, and serve evidence-backed insights with useful outputs. It remains reusable across
-research domains; AI Tutor is one downstream use case.
+findings, and serve evidence-backed Insights. It remains reusable across research domains;
+AI Tutor is one downstream use case.
 
 ## Implemented today
 
-The metadata-only dry-run searches OpenAlex and optionally Crossref, reconciles exact Source
-identities, and reports provider outcomes and attributable publication metadata. It does not
-create a research run, obtain paper content, extract findings, or synthesize evidence.
+The metadata diagnostic searches OpenAlex and optional Crossref in bounded batches. It validates
+provider responses, preserves whole attributable metadata observations, reconciles exact Source
+identity, and exposes partial searches, retry checkpoints, and isolated identity conflicts.
+Display metadata comes from one identified observation, never a mixture of provider fields.
 
-The small retained model distinguishes a research request, actual run/search records, Sources,
-Studies, and Findings. Source identity is Atlas-owned; provider records and external identifiers
-are matching evidence. Bibliographic credits remain provider metadata without contributor identity.
-
-## Product direction
+Small trusted contracts now describe SourceDocument versions, Extraction attempts, Study/Finding
+content provenance, and Insight/Finding relationships. They do not download content, execute
+extraction, generate synthesis, or persist research. Run 001 remains UNEXECUTED.
 
 ```text
-Research question -> research run -> scholarly discovery -> Source
-    -> paper content -> Studies and Findings -> evidence-linked Insights -> useful outputs
+ResearchRequest -> ResearchRun -> SearchExecution -> observations -> Source
+    -> SourceDocument -> Extraction -> Study -> Finding -> Insight -> useful outputs
 ```
 
-Paper-content acquisition, validated extraction, persistence, Insight synthesis, and frontend
-access are future stages. Stage 1 removes speculative architecture without implementing them.
-The Learning Foundations request (Run 001) remains unexecuted.
+Stage 3 will implement the [documented persistence semantics](docs/persistence-boundary.md).
+Later stages provide content acquisition, extraction/synthesis execution, and frontend access.
 
 ## Development
 
-Requires Python 3.14.7 and uv. After dependency changes, refresh the lockfile before locked setup.
+Requires Python 3.14.7 and uv. The lockfile is current; no new Stage 2 dependencies are required.
 
 ```shell
 uv sync --locked
-uv run pytest -q
+uv run pytest
 uv run ruff check .
 uv run ruff format --check .
 uv run pyright
@@ -39,6 +37,6 @@ uv run pyright
 
 - [Architecture](docs/architecture.md)
 - [Research lifecycle](docs/research-lifecycle.md)
-- [Provider behavior and limitations](docs/providers.md)
+- [Providers and checkpoints](docs/providers.md)
 - [Dry-run CLI](docs/cli.md)
 - [Documentation index](docs/index.md)

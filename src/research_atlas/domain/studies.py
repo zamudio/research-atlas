@@ -1,6 +1,7 @@
 """Source, study, and research-run domain records."""
 
-from dataclasses import dataclass
+from collections.abc import Mapping
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Literal
 from uuid import UUID
@@ -37,6 +38,7 @@ class SourceRecord:
     provider_provenance: tuple[SourceProvenance, ...]
     external_identifiers: tuple[ExternalIdentifier, ...] = ()
     source_url: str | None = None
+    display_observation_id: UUID | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -45,6 +47,7 @@ class StudyRecord:
 
     study_id: UUID
     source_id: UUID
+    extraction_id: UUID
     study_type: str
     population_summary: str
     domain_summary: str
@@ -52,6 +55,7 @@ class StudyRecord:
     sample_summary: str
     record_provenance: RecordProvenance
     study_label: str | None = None
+    details: Mapping[str, object] = field(default_factory=dict[str, object])
 
 
 @dataclass(frozen=True, slots=True)

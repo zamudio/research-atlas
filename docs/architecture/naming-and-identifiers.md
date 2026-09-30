@@ -1,25 +1,27 @@
 # Naming and identifiers
 
-Use one name per identity. Do not derive Atlas identity from mutable bibliographic metadata.
+Atlas UUIDs identify Sources, metadata observations, documents, extraction attempts, Studies,
+Findings and Insights. Run/project/search IDs identify their respective ownership boundaries.
+No contributor, construct, measurement or intervention identity is created.
 
-| Name | Meaning |
-| --- | --- |
-| `source_id` | Opaque Atlas UUIDv7 identifying a publication across providers and runs. |
-| `provider_record_id` | Provider-owned identity, qualified by provider and record context. |
-| `external_identifiers` | Registry/provider evidence, such as DOI or PMID; not Atlas identity. |
-| `run_id` | Identity of an actual research effort owned by a project. |
-| `search_execution_id` | Identity of an actual logical search, independent of a planned list position. |
-| `discovery_id` | Identity of a Source's discovery through a search execution. |
-| `study_id` | One study or clearly separable analysis reported by a Source. |
-| `finding_id` | One result reported by a Study. |
-| `search_index` | Temporary zero-based position in a discovery request; never a durable FK. |
-| `result_position` | One-based provider result rank; not Source identity. |
+Provider-qualified publication IDs and explicitly trusted normalized external keys are Source
+matching evidence, not Atlas identity. Unknown reported identifiers stay on metadata observations.
+Provider author IDs and ORCID are bibliographic credit data only. Source metadata provenance and
+search/discovery provenance remain separate.
 
-SourceProvenance identifies the provider publication supplying metadata. SourceDiscovery describes
-how a Source entered a run; its provider record may differ. A BibliographicCredit may retain a
-provider's contributor-record ID, but it is embedded in a whole publication observation and has no
-Atlas person/organization identity. Credit tuple order retains the supplied byline order.
+LiteratureRecord.observation_id identifies the exact attributable snapshot; its candidate Source
+UUID is provisional. resolved_source_id identifies reconciliation success and is null for conflicts.
+Source.display_observation_id names the selected whole snapshot. Stage 3 reuses stored Source IDs
+and observation IDs through indexed identity lookup and replay idempotency; it does not persist
+provisional candidate IDs as extra Sources.
 
-Separate discovery calls may assign different candidate Source IDs. Exact reconciliation keeps
-the first candidate ID within a call. Stored-ID reuse and transactional reconciliation are future
-persistence work; callers must not assume present discovery already provides cross-run durability.
+SourceDocument.document_id pins immutable anchorable bytes with content_sha256. Retrieval URLs
+may change and are not version identities. Extraction.source_document_id selects that exact version;
+Study.extraction_id and Finding.source_study_id complete the provenance path. Evidence anchors are
+plain passage/locator values within that document, not separately identified layout entities.
+
+InsightFinding uses the (insight_id, finding_id) relationship with an explicit role/rationale.
+A Finding's result direction is independent of its relationship to a claim. Configuration hashes
+identify exact retained instructions/settings; software versioning remains independent.
+
+See [persistence semantics](../persistence-boundary.md) for uniqueness and concurrency rules.
