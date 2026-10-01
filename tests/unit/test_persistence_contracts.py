@@ -2,6 +2,7 @@ import io
 from dataclasses import replace
 from datetime import timedelta
 from hashlib import sha256
+from pathlib import Path
 from types import MappingProxyType
 from uuid import uuid7
 
@@ -78,14 +79,32 @@ def test_checksum_verification_and_keyless_components() -> None:
     assert sorted(incoming_components(records)) == [[0], [1], [2, 3]]
 
 
-def test_configuration_is_explicit_secret_and_psycopg_only(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_configuration_is_explicit_secret_and_psycopg_only(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("RESEARCH_ATLAS_DATABASE_URL", raising=False)
+
     with pytest.raises(ValueError, match="DATABASE_URL"):
         create_database_engine()
-    url = "postgresql+psycopg://user:secret@localhost/atlas"
-    monkeypatch.setenv("RESEARCH_ATLAS_DATABASE_URL", url)
-    assert "secret" not in repr(DatabaseSettings())
-    assert database_url(url) == url
+
+    dotenv_url = "postgresql+psycopg://dotenv:secret@localhost/atlas"
+    (tmp_path / ".env").write_text(
+        f"RESEARCH_ATLAS_DATABASE_URL={dotenv_url}\n",
+        encoding="utf-8",
+    )
+    dotenv_value = DatabaseSettings().database_url
+    assert dotenv_value is not None
+    assert dotenv_value.get_secret_value() == dotenv_url
+
+    env_url = "postgresql+psycopg://environment:secret@localhost/atlas"
+    monkeypatch.setenv("RESEARCH_ATLAS_DATABASE_URL", env_url)
+    settings = DatabaseSettings()
+    assert settings.database_url is not None
+    assert settings.database_url.get_secret_value() == env_url
+    assert "secret" not in repr(settings)
+
+    assert database_url(env_url) == env_url
     with pytest.raises(ValueError, match="psycopg"):
         database_url("sqlite://")
 
