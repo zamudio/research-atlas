@@ -7,7 +7,11 @@ from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
 
 class DatabaseSettings(BaseSettings):
-    model_config = SettingsConfigDict(env_prefix="RESEARCH_ATLAS_", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_prefix="RESEARCH_ATLAS_",
+        extra="ignore",
+    )
 
     database_url: SecretStr | None = None
 
