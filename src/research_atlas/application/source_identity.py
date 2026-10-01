@@ -114,6 +114,28 @@ def normalize_identifier(namespace: str, value: str) -> ExternalIdentifier:
     return ExternalIdentifier(namespace=normalized_namespace, value=normalized_value)
 
 
+def openalex_work_id(value: str) -> str | None:
+    """Accept only a bare Work ID or its OpenAlex URL, never an arbitrary content URL."""
+    normalized = normalize_identifier("openalex", value).value
+    return normalized if re.fullmatch(r"W[0-9]+", normalized) else None
+
+
+def openalex_acquisition_identity(keys: Iterable[ExactSourceKey]) -> str:
+    """Resolve durable keys conservatively, preferring provider-record authority."""
+    provider_ids: set[str] = set()
+    external_ids: set[str] = set()
+    for key in keys:
+        if key.namespace != "openalex" or (work_id := openalex_work_id(key.value)) is None:
+            continue
+        (provider_ids if key.kind == "provider_record" else external_ids).add(work_id)
+    usable_ids = provider_ids | external_ids
+    if not usable_ids:
+        raise ValueError("Source has no usable OpenAlex acquisition identity")
+    if len(usable_ids) != 1:
+        raise ValueError("Source has ambiguous OpenAlex acquisition identities")
+    return next(iter(provider_ids or external_ids))
+
+
 def normalize_identifiers(
     identifiers: Iterable[ExternalIdentifier],
 ) -> tuple[ExternalIdentifier, ...]:

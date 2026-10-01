@@ -2,7 +2,7 @@
 
 Research Atlas separates research intent, actual execution, reported findings, and downstream
 interpretation. Executable paths include metadata discovery and the durable research slice accepting
-supplied content/evidence.
+supplied content/evidence, plus bounded OpenAlex cached GROBID XML acquisition for a persisted Source.
 
 - [Architecture](architecture.md): lean v1 boundaries through Stage 4.
 - [Lifecycle](research-lifecycle.md): user request through evidence-backed output.
@@ -18,5 +18,6 @@ supplied content/evidence.
 
 The package retains software versioning. Internal request and record classes are evolving
 pre-v1 implementation details, without independently versioned aggregate/export contracts.
-No document acquisition, extraction engine, concrete LLM provider or frontend is implemented.
+Document acquisition supports only OpenAlex cached GROBID XML, one run/Source at a time.
+Extraction execution, concrete synthesis-provider execution and frontend/API remain unimplemented.
 Run 001 remains unexecuted.

@@ -3,8 +3,9 @@
 The independent architecture audit remains the authority. Stage 1 removed speculative machinery;
 Stage 2 settles ingestion/provenance behavior and small content/evidence contracts. Stage 3 adds
 PostgreSQL persistence for one research slice. Stage 4 completes the validated synthesis boundary,
-Insight publication, seven bounded reads and Evidence Brief. Content acquisition, extraction
-execution, a concrete LLM implementation and frontend/API remain outside this correction.
+Insight publication, seven bounded reads and Evidence Brief. A subsequent bounded operation acquires
+OpenAlex cached GROBID XML for one persisted Source and records immutable content/current run state.
+Extraction execution, a concrete LLM implementation and frontend/API remain unimplemented.
 
 ## Boundaries and retained records
 

@@ -1,7 +1,9 @@
 # Synthesis and product access
 
 Stage 4 completes the lean architecture correction using existing dependencies and 14 relations.
-There is no bundled LLM provider, acquisition/extraction engine, HTTP server or frontend. OpenAlex
+There is no bundled LLM provider, extraction engine, HTTP server or frontend. The separate
+[one-Source acquisition path](providers.md#openalex-document-acquisition) supports OpenAlex cached
+GROBID XML. OpenAlex
 remains primary, Crossref optional, and Semantic Scholar/Zotero deferred. No measured coverage gap
 justifies provider expansion here. These callables are ready for a later UI adapter.
 

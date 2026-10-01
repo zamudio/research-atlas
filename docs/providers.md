@@ -63,6 +63,67 @@ have valid shapes. Publication raw names take precedence over profile names. All
 entries remain observation metadata; known normalized keys alone become matching authority. Top-level
 and ids-map DOI disagreement is preserved for conflict detection, not silently overwritten.
 
+## OpenAlex document acquisition
+
+`application.document_acquisition.acquire_source_document` acquires ONE persisted run/Source.
+It loads membership and authoritative `source_identifiers` through `DocumentAcquisitionPersistence`,
+closes the database read, calls `OpenAlexDocumentAcquirer`, then commits the immutable document and
+processing state in one short transaction. There is no run-wide loop, queue or orchestrator.
+
+```python
+from research_atlas.application.document_acquisition import acquire_source_document
+from research_atlas.infrastructure.config import ProviderSettings
+from research_atlas.infrastructure.persistence.evidence import DocumentAcquisitionPersistence
+from research_atlas.infrastructure.providers.openalex_content import OpenAlexDocumentAcquirer
+
+# Inside an async caller, with an existing engine, persisted run_id and Source UUID:
+document_id = await acquire_source_document(
+    DocumentAcquisitionPersistence(engine),
+    run_id,
+    source_id,
+    OpenAlexDocumentAcquirer(ProviderSettings().openalex_api_key),
+)
+```
+
+Durable OpenAlex provider-record keys are preferred; a normalized external OpenAlex Work ID can
+supply the identity when there is no usable provider-record key. Equivalent keys count once.
+Zero usable IDs or multiple distinct IDs across either kind fail explicitly before HTTP access.
+Display-observation metadata and publisher URLs never choose the acquisition identity.
+Source-level exclusions are rejected before retrieval and rechecked under the commit row lock.
+At commit, the Source row is locked before the run/Source row, matching discovery reconciliation's
+lock order. While holding that lock, acquisition resolves the durable identifiers again and requires
+the one unambiguous Work ID to equal the identity used for retrieval. Missing, ambiguous or changed
+identity aborts without storing a document or changing processing state. Discovery cannot extend
+the Source's identifiers between this revalidation and commit. No lock is held during HTTP I/O.
+
+The only supported representation is `https://content.openalex.org/works/{work_id}.grobid-xml`.
+`RESEARCH_ATLAS_OPENALEX_API_KEY` is REQUIRED for this cached-content path and travels only in the
+bearer header. URLs and retained context are credential-free. Requests do not follow redirects.
+See OpenAlex's [full-text documentation](https://help.openalex.org/access/fulltext/) and
+[authentication documentation](https://help.openalex.org/api/authentication/).
+
+The adapter streams application-visible bytes after httpx transport decoding (including gzip),
+with a maximum of **32 MiB (33,554,432 bytes)**. For unencoded/identity responses, a declared
+Content-Length above the bound aborts before body consumption. For encoded responses (including
+gzip), Content-Length describes the transport representation and is not used as the decoded XML
+length. Crossing the decoded bound while streaming stops and discards partial content.
+Nonempty, well-formed XML is required, without assuming one TEI root shape. Validation uses the
+standard-library Expat parser without constructing or normalizing a content tree or fetching
+external entities. Exact acquired bytes are retained as `grobid_xml`, `application/xml`, with SHA-256,
+retrieval time, source URL and fixed safe outcome context. This does not certify semantic TEI quality.
+
+Three attempts retry 429/5xx and transport failures, using the shared backoff/Retry-After policy
+with delay capped at 20 seconds. Each attempt has a 20-second HTTP timeout and async deadline.
+404 records `unavailable`; other client/auth errors, malformed/empty XML and exhausted retries
+record `failed`. Oversized content records `incomplete`. Remote bodies/exception messages are
+never copied into retained context. Non-usable attempts retain no content bytes.
+
+Usable documents atomically set the run Source to `retrieved`, 404 to `unavailable`, and failed or
+incomplete results to `failed`. Identical usable content returns the existing durable document UUID;
+other outcomes retain distinct immutable attempts. A later usable retry can move failed/unavailable
+to retrieved. Selected accepted evidence is retained across processing-state changes.
+PDF fallback, TEI normalization and extraction execution remain unimplemented. Run 001 is UNEXECUTED.
+
 ## Crossref
 
 /works uses query.bibliographic with cursor=* from the first batch. Every continuation retains all
@@ -88,6 +149,7 @@ only their type and a generic message, not arbitrary payloads. Error reports nev
 authorization headers or raw validation dumps. HTTP/transport, malformed response, invalid checkpoint,
 partial execution and exact-identity conflicts remain distinguishable.
 
-This collector is bounded in-memory developer orchestration, not durable ingestion. Stage 3 must
-reconcile against indexed stored identifiers and commit one batch at a time; it must not accumulate
-an entire corpus and run union-find across it. No database, download or content processing is here.
+The metadata collector is bounded in-memory developer orchestration. The separate durable ingestion
+path reconciles against indexed stored identifiers and commits one batch at a time; it does not
+accumulate an entire corpus and run union-find across it. Document acquisition is the separate
+one-Source operation described above.

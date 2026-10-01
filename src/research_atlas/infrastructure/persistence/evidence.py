@@ -1,4 +1,4 @@
-"""Supplied content and accepted evidence publication, without acquisition or extraction."""
+"""Immutable documents, acquisition outcomes and supplied accepted evidence."""
 
 from dataclasses import asdict
 from hashlib import sha256
@@ -9,6 +9,7 @@ import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
+from research_atlas.application.source_identity import ExactSourceKey, openalex_acquisition_identity
 from research_atlas.domain.content import Extraction, SourceDocument
 from research_atlas.domain.evidence import FindingRecord
 from research_atlas.domain.execution import ScreeningDecision
@@ -37,46 +38,140 @@ async def record_source_document(
 ) -> UUID:
     verify_content(content, document.content_sha256, usable=document.status == "usable")
     json_value(document)
-    values = {**asdict(document), "content": content}
     async with engine.begin() as conn:
-        # Both UUID replay and usable-version uniqueness are backed by PostgreSQL.
-        inserted = (
-            await conn.execute(
-                insert(s.source_documents)
-                .values(**values)
-                .on_conflict_do_nothing()
-                .returning(s.source_documents.c.document_id)
-            )
-        ).scalar_one_or_none()
-        if inserted is not None:
-            return inserted
-        same_id = (
-            (
-                await conn.execute(
-                    sa.select(s.source_documents).where(
-                        s.source_documents.c.document_id == document.document_id
-                    )
-                )
-            )
-            .mappings()
-            .one_or_none()
+        return await _record_source_document(conn, document, content)
+
+
+async def _record_source_document(
+    conn: AsyncConnection, document: SourceDocument, content: bytes | None
+) -> UUID:
+    verify_content(content, document.content_sha256, usable=document.status == "usable")
+    json_value(document)
+    values = {**asdict(document), "content": content}
+    # Both UUID replay and usable-version uniqueness are backed by PostgreSQL.
+    inserted = (
+        await conn.execute(
+            insert(s.source_documents)
+            .values(**values)
+            .on_conflict_do_nothing()
+            .returning(s.source_documents.c.document_id)
         )
-        if same_id is not None:
-            if any(same_id[key] != value for key, value in values.items()):
-                raise ImmutableRecordConflict("document UUID already identifies a different record")
-            return document.document_id
-        if document.status != "usable":
-            raise ImmutableRecordConflict("document retry conflict")
-        return (
+    ).scalar_one_or_none()
+    if inserted is not None:
+        return inserted
+    same_id = (
+        (
             await conn.execute(
-                sa.select(s.source_documents.c.document_id).where(
-                    s.source_documents.c.source_id == document.source_id,
-                    s.source_documents.c.content_kind == document.content_kind,
-                    s.source_documents.c.content_sha256 == document.content_sha256,
-                    s.source_documents.c.status == "usable",
+                sa.select(s.source_documents).where(
+                    s.source_documents.c.document_id == document.document_id
                 )
             )
-        ).scalar_one()
+        )
+        .mappings()
+        .one_or_none()
+    )
+    if same_id is not None:
+        if any(same_id[key] != value for key, value in values.items()):
+            raise ImmutableRecordConflict("document UUID already identifies a different record")
+        return document.document_id
+    if document.status != "usable":
+        raise ImmutableRecordConflict("document retry conflict")
+    return (
+        await conn.execute(
+            sa.select(s.source_documents.c.document_id).where(
+                s.source_documents.c.source_id == document.source_id,
+                s.source_documents.c.content_kind == document.content_kind,
+                s.source_documents.c.content_sha256 == document.content_sha256,
+                s.source_documents.c.status == "usable",
+            )
+        )
+    ).scalar_one()
+
+
+async def _acquisition_membership(
+    conn: AsyncConnection, run_id: str, source_id: UUID, *, lock: bool = False
+) -> None:
+    query = sa.select(s.run_sources.c.screening_decision).where(
+        s.run_sources.c.run_id == run_id, s.run_sources.c.source_id == source_id
+    )
+    if lock:
+        query = query.with_for_update()
+    row = (await conn.execute(query)).one_or_none()
+    if row is None:
+        raise ValueError("run/Source membership does not exist")
+    if row[0] == "exclude":
+        raise ValueError("excluded run/Source cannot acquire content")
+
+
+async def _openalex_acquisition_identity(conn: AsyncConnection, source_id: UUID) -> str:
+    rows = (
+        await conn.execute(
+            sa.select(s.source_identifiers.c.kind, s.source_identifiers.c.value).where(
+                s.source_identifiers.c.source_id == source_id,
+                s.source_identifiers.c.namespace == "openalex",
+            )
+        )
+    ).all()
+    return openalex_acquisition_identity(
+        ExactSourceKey(kind, "openalex", value) for kind, value in rows
+    )
+
+
+class DocumentAcquisitionPersistence:
+    """Two short operations; neither keeps a connection open during provider I/O."""
+
+    def __init__(self, engine: AsyncEngine) -> None:
+        self._engine = engine
+
+    async def load_acquisition_identity(
+        self, run_id: str, source_id: UUID, provider_id: str
+    ) -> str:
+        if provider_id != "openalex":
+            raise ValueError("document acquisition supports only OpenAlex")
+        async with self._engine.connect() as conn:
+            await _acquisition_membership(conn, run_id, source_id)
+            return await _openalex_acquisition_identity(conn, source_id)
+
+    async def commit_document_acquisition(
+        self,
+        run_id: str,
+        document: SourceDocument,
+        content: bytes | None,
+        *,
+        expected_identity: str,
+    ) -> UUID:
+        state = {
+            "usable": "retrieved",
+            "unavailable": "unavailable",
+            "failed": "failed",
+            "incomplete": "failed",
+        }[document.status]
+        async with self._engine.begin() as conn:
+            # Discovery reconciliation locks Source before identifiers/membership.
+            # Use the same order and hold the Source lock until the atomic commit.
+            source_id = (
+                await conn.execute(
+                    sa.select(s.sources.c.source_id)
+                    .where(s.sources.c.source_id == document.source_id)
+                    .with_for_update()
+                )
+            ).scalar_one_or_none()
+            if source_id is None:
+                raise ValueError("Source does not exist")
+            current_identity = await _openalex_acquisition_identity(conn, source_id)
+            if current_identity != expected_identity:
+                raise ValueError("Source acquisition identity changed during retrieval")
+            await _acquisition_membership(conn, run_id, document.source_id, lock=True)
+            document_id = await _record_source_document(conn, document, content)
+            await conn.execute(
+                s.run_sources.update()
+                .where(
+                    s.run_sources.c.run_id == run_id,
+                    s.run_sources.c.source_id == document.source_id,
+                )
+                .values(processing_state=state)
+            )
+            return document_id
 
 
 async def _document(conn: AsyncConnection, document_id: UUID) -> sa.RowMapping:

@@ -31,8 +31,12 @@ Sources were retrieved or extracted. State updates are explicit and do not clear
 SourceDocument identifies an immutable version of anchorable content with Source, kind, checksum,
 retrieval context/time and usability status. A changed parsed text or payload is a new version.
 Extraction records one attempt against exactly that version, creating run, purpose, configuration
-hash, tools/models, timing and validation/review outcome. These are contracts, not download/extraction
-services. Persistence retains exact content and configuration bytes alongside their SHA-256 hashes.
+hash, tools/models, timing and validation/review outcome. Persistence retains exact content and
+configuration bytes alongside their SHA-256 hashes. The bounded
+[OpenAlex acquisition operation](providers.md#openalex-document-acquisition) now retrieves cached
+GROBID XML for one persisted run/Source using durable OpenAlex identity and a required API key.
+It retains exact XML bytes and atomically records the document and processing outcome.
+Extraction execution is still unimplemented; accepted evidence is caller-supplied.
 
 Queued/running attempts are distinct from accepted, review_needed, failed and rejected results.
 Finalized attempts cannot be overwritten. A rerun creates a new extraction identity even if its

@@ -38,7 +38,7 @@ They return IDs/small results, never ORM model graphs. They are available from:
 | --- | --- |
 | `runs` | `create_project`, `create_research_run`, `start_search_execution` |
 | `discovery` | `DiscoveryPersistence.load_search_resume_state`, `commit_discovery_batch`, `record_search_failure` |
-| `evidence` | `record_source_document`, `load_source_document`, `record_extraction`, `publish_accepted_extraction`, `select_run_source_extraction`, `set_processing_state`, `apply_screening_decision` |
+| `evidence` | `record_source_document`, `load_source_document`, `record_extraction`, `publish_accepted_extraction`, `select_run_source_extraction`, `set_processing_state`, `apply_screening_decision`, `DocumentAcquisitionPersistence.load_acquisition_identity`, `commit_document_acquisition` |
 | `insights` | `PostgresInsightPublication.load_evidence`, `publish` |
 | `reads` | `run_progress`, `run_sources`, `source_detail`, `insight_detail`, `insight_evidence`, `study_context`, `output_insights` |
 
@@ -145,5 +145,9 @@ cover invalid proposals/publication rollback, immutable history, selection races
 and publication, mixed/null evidence, dependence warnings, citations and pagination/isolation.
 
 See [synthesis and product access](synthesis-and-product-access.md) for exact bounds and callables.
-No document downloading/parsing, extraction engine, concrete external LLM, API/frontend, or generated
-recommendation/prompt service is implemented. Run 001 remains UNEXECUTED.
+The [OpenAlex acquisition callable](providers.md#openalex-document-acquisition) loads durable Work
+identity, retrieves bounded cached GROBID XML outside PostgreSQL transactions, then atomically records
+the immutable SourceDocument and run processing state. Existing usable-version deduplication and
+immutability remain intact; no schema or migration change is needed.
+Extraction execution, concrete synthesis-provider execution, API/frontend and generated
+recommendation/prompt services remain unimplemented. Run 001 remains UNEXECUTED.

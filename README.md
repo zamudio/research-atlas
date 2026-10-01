@@ -12,7 +12,7 @@ identity, and exposes partial searches, retry checkpoints, and isolated identity
 Display metadata comes from one identified observation, never a mixture of provider fields.
 
 PostgreSQL persistence now retains runs, bounded search batches, reconciled Sources, complete
-metadata observations, supplied SourceDocument content, and accepted Extraction/Study/Finding
+metadata observations, immutable SourceDocument content, and accepted Extraction/Study/Finding
 results. Batch/checkpoint commits and accepted evidence publication are atomic. Immutable content
 and evidence remain addressable across retries and re-extraction. Run 001 remains UNEXECUTED.
 
@@ -24,8 +24,13 @@ ResearchRequest -> ResearchRun -> SearchExecution -> observations -> Source
 Stage 4 adds validated synthesis from explicitly selected Findings, atomic immutable Insight
 publication, seven bounded typed product reads, and a deterministic cited Markdown Evidence Brief.
 Synthesis uses a caller-supplied provider-neutral implementation; no external LLM is bundled.
-SQLAlchemy Core, Psycopg and Alembic retain exactly 14 application relations. There is no document
-acquisition/extraction engine or frontend/API. OpenAlex remains primary and Crossref optional;
+Atlas can acquire OpenAlex cached GROBID XML for one persisted run/Source at a time. The operation
+requires the OpenAlex API key, resolves durable identifiers, bounds decoded XML to 32 MiB, retains
+exact immutable bytes, and atomically records the document and run-specific processing outcome.
+See [document acquisition](docs/providers.md#openalex-document-acquisition) for the callable.
+SQLAlchemy Core, Psycopg and Alembic retain exactly 14 application relations. Extraction execution,
+concrete synthesis-provider execution and frontend/API are still unimplemented. OpenAlex remains
+primary and Crossref optional;
 Semantic Scholar and Zotero remain deferred.
 See [synthesis and product access](docs/synthesis-and-product-access.md) for the callable workflow
 and [database setup](docs/database.md) for configuration and migrations.
