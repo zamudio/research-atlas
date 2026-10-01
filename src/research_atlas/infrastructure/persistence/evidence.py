@@ -9,6 +9,7 @@ import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
+from research_atlas.application.ports.extraction import ExtractionEligibilityChanged
 from research_atlas.application.source_identity import ExactSourceKey, openalex_acquisition_identity
 from research_atlas.domain.content import Extraction, SourceDocument
 from research_atlas.domain.evidence import FindingRecord
@@ -198,12 +199,26 @@ async def load_source_document(
         ), row["content"]
 
 
+async def load_extraction_document(
+    engine: AsyncEngine, run_id: str, source_id: UUID, document_id: UUID
+) -> tuple[SourceDocument, bytes]:
+    async with engine.connect() as conn:
+        await _acquisition_membership(conn, run_id, source_id)
+        row = await _document(conn, document_id)
+        if row["source_id"] != source_id or row["status"] != "usable":
+            raise ValueError("extraction requires a usable document belonging to this Source")
+        return SourceDocument(
+            **{key: value for key, value in row.items() if key != "content"}
+        ), row["content"]
+
+
 async def _save_extraction(
     conn: AsyncConnection,
     extraction: Extraction,
     document: sa.RowMapping,
     configuration: bytes,
     publication_digest: str | None = None,
+    raw_output: bytes | None = None,
 ) -> bool:
     if sha256(configuration).hexdigest() != extraction.configuration_sha256:
         raise ValueError("extraction configuration checksum mismatch")
@@ -215,6 +230,8 @@ async def _save_extraction(
         "document_status": document["status"],
         "record_provenance": json_value(extraction.record_provenance),
         "publication_digest": publication_digest,
+        "raw_output": raw_output,
+        "raw_output_sha256": sha256(raw_output).hexdigest() if raw_output is not None else None,
     }
     created = (
         await conn.execute(
@@ -255,14 +272,18 @@ async def _save_extraction(
 
 
 async def record_extraction(
-    engine: AsyncEngine, extraction: Extraction, configuration: bytes
+    engine: AsyncEngine,
+    extraction: Extraction,
+    configuration: bytes,
+    *,
+    raw_output: bytes | None = None,
 ) -> None:
     """Record supplied pending/failed/review-needed attempts; accepted output uses publication."""
     if extraction.status == "accepted":
         raise ValueError("accepted output must use atomic evidence publication")
     async with engine.begin() as conn:
         document = await _document(conn, extraction.source_document_id)
-        await _save_extraction(conn, extraction, document, configuration)
+        await _save_extraction(conn, extraction, document, configuration, raw_output=raw_output)
 
 
 async def publish_accepted_extraction(
@@ -271,20 +292,32 @@ async def publish_accepted_extraction(
     configuration: bytes,
     studies: tuple[StudyRecord, ...],
     findings: tuple[FindingRecord, ...],
+    *,
+    raw_output: bytes | None = None,
+    select_for_run: bool = False,
 ) -> None:
     if extraction.status != "accepted":
         raise ValueError("publication requires accepted extraction")
-    publication_digest = digest(
-        {"extraction": extraction, "studies": studies, "findings": findings}
-    )
+    publication: dict[str, object] = {
+        "extraction": extraction,
+        "studies": studies,
+        "findings": findings,
+    }
+    if raw_output is not None:
+        publication["raw_output_sha256"] = sha256(raw_output).hexdigest()
+    publication_digest = digest(publication)
     async with engine.begin() as conn:
         document = await _document(conn, extraction.source_document_id)
         if document["status"] != "usable":
             raise ValueError("accepted evidence requires usable immutable content")
+        if select_for_run:
+            await _extraction_publication_membership(conn, extraction.run_id, document["source_id"])
         is_new = await _save_extraction(
-            conn, extraction, document, configuration, publication_digest
+            conn, extraction, document, configuration, publication_digest, raw_output
         )
         if not is_new:
+            if select_for_run:
+                await _select_published(conn, extraction, document["source_id"])
             return
         study_ids: set[UUID] = set()
         for study in studies:
@@ -333,6 +366,31 @@ async def publish_accepted_extraction(
                     data=data,
                 )
             )
+        if select_for_run:
+            await _select_published(conn, extraction, document["source_id"])
+
+
+async def _extraction_publication_membership(
+    conn: AsyncConnection, run_id: str, source_id: UUID
+) -> None:
+    row = (
+        await conn.execute(
+            sa.select(s.run_sources.c.screening_decision)
+            .where(s.run_sources.c.run_id == run_id, s.run_sources.c.source_id == source_id)
+            .with_for_update()
+        )
+    ).one_or_none()
+    if row is None or row[0] == "exclude":
+        raise ExtractionEligibilityChanged("run/Source membership or screening changed")
+
+
+async def _select_published(conn: AsyncConnection, extraction: Extraction, source_id: UUID) -> None:
+    # Called only after accepted evidence publication, under the locked membership.
+    await conn.execute(
+        s.run_sources.update()
+        .where(s.run_sources.c.run_id == extraction.run_id, s.run_sources.c.source_id == source_id)
+        .values(selected_extraction_id=extraction.extraction_id, processing_state="extracted")
+    )
 
 
 async def select_run_source_extraction(

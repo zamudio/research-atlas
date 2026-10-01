@@ -28,8 +28,14 @@ Atlas can acquire OpenAlex cached GROBID XML for one persisted run/Source at a t
 requires the OpenAlex API key, resolves durable identifiers, bounds decoded XML to 32 MiB, retains
 exact immutable bytes, and atomically records the document and run-specific processing outcome.
 See [document acquisition](docs/providers.md#openalex-document-acquisition) for the callable.
-SQLAlchemy Core, Psycopg and Alembic retain exactly 14 application relations. Extraction execution,
-concrete synthesis-provider execution and frontend/API are still unimplemented. OpenAlex remains
+Atlas can now execute one document extraction: deterministic GROBID XML projection creates an
+immutable, anchorable text SourceDocument, then a structured-output provider supplies nested
+Study/Finding candidates. Validated exact passages publish atomically with run selection and
+processing state. Exact structured model output is retained, without the provider envelope or
+hidden reasoning. The disposable local reference adapter uses Ollama and `qwen3.5:4b`; the model
+and endpoint are configurable. See [extraction execution](docs/providers.md#local-extraction-execution).
+SQLAlchemy Core, Psycopg and Alembic retain exactly 14 application relations. Concrete
+synthesis-provider execution, broader run orchestration and frontend/API remain future work. OpenAlex remains
 primary and Crossref optional;
 Semantic Scholar and Zotero remain deferred.
 See [synthesis and product access](docs/synthesis-and-product-access.md) for the callable workflow

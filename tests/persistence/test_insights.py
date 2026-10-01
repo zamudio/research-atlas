@@ -389,6 +389,10 @@ def test_publication_locks_selection_until_commit(
 
 def test_stage3_rows_upgrade_as_drafts_without_invented_publication(pg_engine: AsyncEngine) -> None:
     async def scenario() -> None:
+        # Seed evidence using today's writer before dropping columns unavailable at Stage 3.
+        # The retained evidence/configuration is unchanged by the downgrade.
+        await seed(pg_engine)
+        case = await accepted_case(pg_engine)
         async with pg_engine.begin() as conn:
 
             def stage3(sync: sa.Connection) -> None:
@@ -397,8 +401,6 @@ def test_stage3_rows_upgrade_as_drafts_without_invented_publication(pg_engine: A
                 command.downgrade(config, "0001_lean_persistence")
 
             await conn.run_sync(stage3)
-        await seed(pg_engine)
-        case = await accepted_case(pg_engine)
         legacy = insight_for(case)
         async with pg_engine.begin() as conn:
             await conn.execute(

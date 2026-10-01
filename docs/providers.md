@@ -122,7 +122,74 @@ Usable documents atomically set the run Source to `retrieved`, 404 to `unavailab
 incomplete results to `failed`. Identical usable content returns the existing durable document UUID;
 other outcomes retain distinct immutable attempts. A later usable retry can move failed/unavailable
 to retrieved. Selected accepted evidence is retained across processing-state changes.
-PDF fallback, TEI normalization and extraction execution remain unimplemented. Run 001 is UNEXECUTED.
+PDF fallback remains unimplemented. Run 001 is UNEXECUTED.
+
+## Local extraction execution
+
+`application.extraction.extract_source_document` executes one acquired GROBID XML document for
+an existing run/Source. Its application port is provider-neutral. `OllamaExtractor` is a disposable
+local reference adapter, not a permanent provider/model decision. No API key or Ollama SDK is used.
+
+```python
+from research_atlas.application.extraction import extract_source_document
+from research_atlas.infrastructure.persistence.extraction import PostgresExtractionPersistence
+from research_atlas.infrastructure.providers.ollama import OllamaExtractor
+
+# Inside an async caller, using a compatible event loop and an existing engine:
+extraction = await extract_source_document(
+    PostgresExtractionPersistence(engine),
+    OllamaExtractor(),
+    run_id=run_id,
+    source_id=source_id,
+    document_id=document_id,  # the acquired grobid_xml SourceDocument UUID
+)
+```
+
+Environment-backed provider settings are `RESEARCH_ATLAS_OLLAMA_BASE_URL` (default
+`http://localhost:11434`), `RESEARCH_ATLAS_EXTRACTION_MODEL` (temporary default `qwen3.5:4b`),
+and `RESEARCH_ATLAS_EXTRACTION_TIMEOUT_SECONDS` (default 600, maximum 1800). A different local
+Qwen tag requires only changing the model setting. Exact effective endpoint/model/settings,
+instructions, JSON Schema and projection version are retained as configuration bytes with SHA-256.
+Model identity records the returned matching tag; tool provenance records the Atlas adapter version.
+This slice does not pin an immutable model-weight digest or query the Ollama runtime version.
+
+The operation verifies membership, screening and parent checksum, then projects namespaced TEI
+title/abstract/body into deterministic whitespace-normalized UTF-8 plain text (`grobid_text`).
+DTDs/entities, malformed or unusable TEI are rejected before model execution. Research headings
+and paragraph boundaries are retained without XML markup. The original XML stays immutable;
+derived retrieval context names its exact parent UUID and `atlas.grobid-text.v1`. Existing usable
+content identity safely deduplicates repeated projections; if multiple parents produce identical
+text, the retained version keeps the first projection's parent context.
+
+A running Extraction uses the persisted **text** document UUID. After all database connections
+close, the adapter issues one `/api/chat` request with `stream=false`, `think=false`, JSON Schema
+in `format`, and temperature 0. There is a bounded total timeout and no generation retry or redirect.
+The adapter requires `done` to be exactly `true`. If `done_reason` is supplied, it must be `stop`;
+omission is allowed on a completed response. Incomplete, length-limited or other non-normal
+completion fails before proposal validation, preserving any returned content string as exact bytes.
+The exact UTF-8 bytes of `message.content` are retained before schema/domain validation, rather than
+reserializing parsed JSON. The complete response envelope, hidden reasoning and arbitrary provider
+error bodies are discarded. Malformed JSON/schema returns `failed` with validation `failed`;
+empty/nonempirical proposals or inexact passages return `review_needed` with validation `failed`
+and review `pending`. Provider/transport/contract errors return `failed` with validation `pending`.
+Transport/status/missing-content errors fail
+without raw output; empty/whitespace content or content with mismatched model identity is retained
+as failed when a string was actually returned.
+
+Only nested, bounded proposals with findings for every Study and exact passages may publish.
+Atlas generates all IDs and provenance. Unknown optional Study summaries map to empty strings in
+the existing string-valued domain contract. Persistence rechecks ownership and exact anchors,
+then atomically publishes Extraction/Studies/Findings, selects the extraction, and sets `extracted`.
+The provider-neutral `ExtractionEligibilityChanged` condition identifies run/Source membership
+removal or screening exclusion at publication. It rolls back normalized evidence and records
+`review_needed` with validation `passed`, review `pending` and raw output. Unexpected publication
+invariant/programming/database errors propagate; previously retained running
+attempt/raw bytes remain available for inspection. Each invocation creates a new attempt, not an
+automatic retry. Failed/review-needed attempts do not replace an existing accepted run selection.
+
+This slice validates structure and attribution; it does not certify scientific completeness or
+accuracy. Chunking/context-budget management, human review, synthesis-provider execution and
+broader research-run orchestration remain future work. Automated tests use mocks, never live Ollama.
 
 ## Crossref
 

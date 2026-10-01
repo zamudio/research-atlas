@@ -138,6 +138,17 @@ Changed content/configuration/provenance under an existing UUID raises `Immutabl
 Legacy drafts are inspectable but cannot be passed to output generation or overwritten by publication;
 deliberately publish a new UUID after validating the proposal.
 
+`0003_extraction_raw_output` adds nullable `raw_output` BYTEA and `raw_output_sha256` TEXT on
+`extractions`, with a both-or-neither PostgreSQL SHA-256 check. No table is added. Existing finalized
+extraction triggers cover these columns. Accepted publication digests include the raw-output hash
+when present, tying normalized evidence and retry identity to the exact structured model response;
+legacy caller-supplied evidence without raw output retains its existing digest identity. Both
+`record_extraction` and `publish_accepted_extraction` accept optional `raw_output` bytes.
+`publish_accepted_extraction(..., select_for_run=True)` additionally locks/rechecks membership and
+screening, selects the accepted extraction and sets `extracted` in the publication transaction.
+The [bounded execution callable](providers.md#local-extraction-execution) uses these existing
+operations, retaining response bytes in a short transaction before parsing and publication.
+
 No new index or table is required: the existing run, relationship composite primary key and Finding
 FK indexes serve Stage 4 reads. Multi-query product reads use a REPEATABLE READ snapshot; normal writes
 retain READ COMMITTED. Query-count acceptance tests cover all seven reads at sizes 5 and 10; tests also
@@ -149,5 +160,6 @@ The [OpenAlex acquisition callable](providers.md#openalex-document-acquisition) 
 identity, retrieves bounded cached GROBID XML outside PostgreSQL transactions, then atomically records
 the immutable SourceDocument and run processing state. Existing usable-version deduplication and
 immutability remain intact; no schema or migration change is needed.
-Extraction execution, concrete synthesis-provider execution, API/frontend and generated
+Concrete local extraction execution is available through `PostgresExtractionPersistence` and the
+provider-neutral application port. Concrete synthesis-provider execution, API/frontend and generated
 recommendation/prompt services remain unimplemented. Run 001 remains UNEXECUTED.

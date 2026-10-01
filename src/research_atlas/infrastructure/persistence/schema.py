@@ -232,6 +232,14 @@ extractions = sa.Table(
     sa.Column("started_at", sa.DateTime(timezone=True)),
     sa.Column("completed_at", sa.DateTime(timezone=True)),
     sa.Column("publication_digest", sa.Text),
+    sa.Column("raw_output", sa.LargeBinary),
+    sa.Column("raw_output_sha256", sa.Text),
+    sa.CheckConstraint(
+        "(raw_output IS NULL AND raw_output_sha256 IS NULL) OR "
+        "(raw_output IS NOT NULL AND raw_output_sha256 IS NOT NULL AND "
+        "raw_output_sha256 = encode(sha256(raw_output), 'hex'))",
+        name="raw_output",
+    ),
     sa.UniqueConstraint("extraction_id", "source_id", "status"),
     sa.ForeignKeyConstraint(
         ["source_document_id", "source_id", "document_status"],
