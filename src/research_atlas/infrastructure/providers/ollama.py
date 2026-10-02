@@ -1,4 +1,4 @@
-"""Disposable local reference adapter; one generation, no reasoning retention."""
+"""Ollama reference adapter; one generation, no reasoning retention."""
 
 import asyncio
 from collections.abc import Mapping
@@ -11,6 +11,10 @@ from research_atlas.application.ports.extraction import (
     StructuredExtractionResult,
 )
 from research_atlas.infrastructure.config import ProviderSettings
+from research_atlas.infrastructure.providers._extraction_config import (
+    extraction_base_url,
+    extraction_model,
+)
 
 _ADAPTER_VERSION = "atlas.ollama-chat.v1"
 
@@ -22,11 +26,10 @@ class OllamaExtractor:
         client: httpx.AsyncClient | None = None,
     ) -> None:
         settings = settings or ProviderSettings()
-        self._base_url = settings.ollama_base_url.rstrip("/")
-        url = httpx.URL(self._base_url)
-        if url.scheme not in {"http", "https"} or not url.host or url.userinfo or url.query:
-            raise ValueError("Ollama base URL requires HTTP(S) without credentials or query")
-        self._model = settings.extraction_model
+        self._model = extraction_model(settings)
+        self._base_url = extraction_base_url(settings, "http://localhost:11434")
+        key = settings.extraction_api_key
+        self._api_key = key if key is not None and key.get_secret_value().strip() else None
         self._timeout = settings.extraction_timeout_seconds
         self._client = client
 
@@ -34,11 +37,13 @@ class OllamaExtractor:
     def configuration(self) -> Mapping[str, object]:
         return {
             "adapter": _ADAPTER_VERSION,
+            "provider": "ollama",
             "base_url": self._base_url,
             "model": self._model,
             "stream": False,
             "think": False,
             "temperature": 0,
+            "structured_output": "json_schema",
             "timeout_seconds": self._timeout,
         }
 
@@ -73,6 +78,11 @@ class OllamaExtractor:
                 response = await client.post(
                     self._base_url + "/api/chat",
                     json=payload,
+                    headers=(
+                        {"Authorization": f"Bearer {self._api_key.get_secret_value()}"}
+                        if self._api_key is not None
+                        else {}
+                    ),
                     timeout=self._timeout,
                     follow_redirects=False,
                 )

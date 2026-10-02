@@ -32,6 +32,12 @@ class StructuredExtractionResult:
 
 
 class StructuredExtractor(Protocol):
+    """Inject any provider implementation directly, without the built-in factory.
+
+    Configuration contains reproducibility-safe settings only, never credentials.
+    Results retain exact final structured output, never provider envelopes or reasoning.
+    """
+
     @property
     def configuration(self) -> Mapping[str, object]: ...
 

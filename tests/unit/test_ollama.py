@@ -4,6 +4,8 @@ from collections.abc import Mapping
 import httpx
 import pytest
 
+from research_atlas.application.extraction import EXTRACTION_INSTRUCTIONS
+from research_atlas.application.passage_index import build_passage_index
 from research_atlas.application.ports.extraction import ExtractionProviderError
 from research_atlas.infrastructure.config import ProviderSettings
 from research_atlas.infrastructure.providers.ollama import OllamaExtractor
@@ -13,6 +15,7 @@ from tests.persistence.conftest import run
 
 def test_ollama_request_contract_configured_endpoint_and_exact_content() -> None:
     schema = ExtractionProposal.model_json_schema()
+    indexed_text = build_passage_index(b"Results\n\nNo change.\n").model_text
     raw = ' \n{ "studies": [] }\n '
     calls = 0
 
@@ -24,13 +27,13 @@ def test_ollama_request_contract_configured_endpoint_and_exact_content() -> None
         )
         payload = json.loads(request.content)
         assert payload == {
-            "model": "qwen-next:4b",
+            "model": "reference:4b",
             "stream": False,
             "think": False,
             "format": schema,
             "messages": [
-                {"role": "system", "content": "instructions"},
-                {"role": "user", "content": "exact document"},
+                {"role": "system", "content": EXTRACTION_INSTRUCTIONS},
+                {"role": "user", "content": indexed_text},
             ],
             "options": {"temperature": 0},
         }
@@ -43,7 +46,7 @@ def test_ollama_request_contract_configured_endpoint_and_exact_content() -> None
         return httpx.Response(
             200,
             json={
-                "model": "qwen-next:4b",
+                "model": "reference:4b",
                 "done": True,
                 "done_reason": "stop",
                 "message": {"content": raw, "thinking": "hidden reasoning"},
@@ -55,14 +58,14 @@ def test_ollama_request_contract_configured_endpoint_and_exact_content() -> None
         async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
             provider = OllamaExtractor(
                 ProviderSettings(
-                    ollama_base_url="http://reference.test:11435/",
-                    extraction_model="qwen-next:4b",
+                    extraction_base_url="http://reference.test:11435/",
+                    extraction_model="reference:4b",
                 ),
                 client,
             )
-            result = await provider.extract("instructions", "exact document", schema)
+            result = await provider.extract(EXTRACTION_INSTRUCTIONS, indexed_text, schema)
             assert result.raw_output == raw.encode("utf-8")
-            assert result.model_version == "qwen-next:4b"
+            assert result.model_version == "reference:4b"
             assert result.tool_name == "atlas-ollama-chat"
             assert provider.configuration["think"] is False
             assert "thinking" not in repr(result) and "other_metadata" not in repr(result)
@@ -112,7 +115,9 @@ def test_ollama_safe_failures_have_no_body_secrets_or_generation_retries(fault: 
     async def scenario() -> None:
         async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
             with pytest.raises(ExtractionProviderError) as error:
-                await OllamaExtractor(ProviderSettings(), client).extract("prompt", "doc", {})
+                await OllamaExtractor(
+                    ProviderSettings(extraction_model="reference:4b"), client
+                ).extract("prompt", "doc", {})
             assert "secret" not in str(error.value)
             assert error.value.__cause__ is None
             expected_raw = b"{}" if fault == "model" else b" " if fault == "empty" else None
@@ -153,7 +158,7 @@ def test_ollama_requires_normal_completion_and_preserves_returned_bytes(
         return httpx.Response(
             200,
             json={
-                "model": "qwen3.5:4b",
+                "model": "reference:4b",
                 "message": {"content": raw, "thinking": "hidden reasoning"},
                 **completion,
             },
@@ -161,7 +166,7 @@ def test_ollama_requires_normal_completion_and_preserves_returned_bytes(
 
     async def scenario() -> None:
         async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-            provider = OllamaExtractor(ProviderSettings(extraction_model="qwen3.5:4b"), client)
+            provider = OllamaExtractor(ProviderSettings(extraction_model="reference:4b"), client)
             if successful:
                 assert (await provider.extract("prompt", "doc", {})).raw_output == raw.encode()
             else:
@@ -177,13 +182,19 @@ def test_ollama_requires_normal_completion_and_preserves_returned_bytes(
 
 
 def test_ollama_environment_configuration_and_bounds(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("RESEARCH_ATLAS_EXTRACTION_MODEL", "qwen-next:8b")
-    monkeypatch.setenv("RESEARCH_ATLAS_OLLAMA_BASE_URL", "http://localhost:12434")
+    monkeypatch.setenv("RESEARCH_ATLAS_EXTRACTION_MODEL", "reference:8b")
+    monkeypatch.setenv("RESEARCH_ATLAS_EXTRACTION_BASE_URL", "http://localhost:12434")
     provider = OllamaExtractor()
-    assert provider.configuration["model"] == "qwen-next:8b"
+    assert provider.configuration["model"] == "reference:8b"
     assert provider.configuration["base_url"] == "http://localhost:12434"
-    for url in ("ftp://localhost", "http://user:secret@localhost", "http://localhost?token=secret"):
+    for url in (
+        "ftp://localhost",
+        "http://user:secret@localhost",
+        "http://localhost?token=secret",
+        "http://localhost#secret",
+        "http://localhost:invalid",
+    ):
         with pytest.raises(ValueError):
-            OllamaExtractor(ProviderSettings(ollama_base_url=url))
+            OllamaExtractor(ProviderSettings(extraction_base_url=url, extraction_model="reference"))
     with pytest.raises(ValueError):
         ProviderSettings(extraction_timeout_seconds=1801)

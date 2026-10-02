@@ -124,34 +124,78 @@ other outcomes retain distinct immutable attempts. A later usable retry can move
 to retrieved. Selected accepted evidence is retained across processing-state changes.
 PDF fallback remains unimplemented. Run 001 is UNEXECUTED.
 
-## Local extraction execution
+## Extraction execution
 
 `application.extraction.extract_source_document` executes one acquired GROBID XML document for
-an existing run/Source. Its application port is provider-neutral. `OllamaExtractor` is a disposable
-local reference adapter, not a permanent provider/model decision. No API key or Ollama SDK is used.
+an existing run/Source. Application code depends only on the `StructuredExtractor` protocol.
+Provider/model selection, credentials, HTTP requests and response parsing belong to infrastructure.
+Ollama is one local reference adapter; OpenAI Responses is one cloud reference adapter. Neither
+is the architectural default. The user must explicitly choose the provider and model.
 
 ```python
 from research_atlas.application.extraction import extract_source_document
+from research_atlas.infrastructure.config import ProviderSettings
 from research_atlas.infrastructure.persistence.extraction import PostgresExtractionPersistence
-from research_atlas.infrastructure.providers.ollama import OllamaExtractor
+from research_atlas.infrastructure.providers.structured_extraction import (
+    create_structured_extractor,
+)
 
 # Inside an async caller, using a compatible event loop and an existing engine:
 extraction = await extract_source_document(
     PostgresExtractionPersistence(engine),
-    OllamaExtractor(),
+    create_structured_extractor(ProviderSettings()),
     run_id=run_id,
     source_id=source_id,
     document_id=document_id,  # the acquired grobid_xml SourceDocument UUID
 )
 ```
 
-Environment-backed provider settings are `RESEARCH_ATLAS_OLLAMA_BASE_URL` (default
-`http://localhost:11434`), `RESEARCH_ATLAS_EXTRACTION_MODEL` (temporary default `qwen3.5:4b`),
-and `RESEARCH_ATLAS_EXTRACTION_TIMEOUT_SECONDS` (default 600, maximum 1800). A different local
-Qwen tag requires only changing the model setting. Exact effective endpoint/model/settings,
-instructions, JSON Schema and projection version are retained as configuration bytes with SHA-256.
-Model identity records the returned matching tag; tool provenance records the Atlas adapter version.
-This slice does not pin an immutable model-weight digest or query the Ollama runtime version.
+Generic runtime settings:
+
+| Environment variable | Behavior |
+| --- | --- |
+| `RESEARCH_ATLAS_EXTRACTION_PROVIDER` | Required when constructing through the built-in factory: `ollama` or `openai`. No default. |
+| `RESEARCH_ATLAS_EXTRACTION_MODEL` | Explicit compatible model/tag chosen by the user. No default. |
+| `RESEARCH_ATLAS_EXTRACTION_BASE_URL` | Optional safe endpoint base. Selected Ollama defaults to `http://localhost:11434`; selected OpenAI defaults to `https://api.openai.com/v1`. |
+| `RESEARCH_ATLAS_EXTRACTION_API_KEY` | Runtime `SecretStr`: required for OpenAI, optional bearer authentication for Ollama. |
+| `RESEARCH_ATLAS_EXTRACTION_TIMEOUT_SECONDS` | Default 600; positive and at most 1800. |
+
+`ProviderSettings` still loads for discovery/acquisition without extraction configuration. The
+factory rejects absent provider/model, unknown built-in providers, and missing OpenAI credentials
+when construction is requested. Direct adapter construction also requires an explicit model.
+The previous Ollama-specific base URL setting is replaced by the generic extraction base URL.
+Base URLs cannot contain userinfo, query strings or fragments. When sending a configured credential,
+adapters require HTTPS except for HTTP endpoints at `localhost`, `127.0.0.1` or `::1`.
+Unauthenticated Ollama continues to support local HTTP. OpenAI bases include the API prefix
+(`/v1` for the official endpoint); the adapter appends `/responses`.
+Keep credentials in the process environment or an untracked local `.env`, never in Git or URLs.
+
+Adapters expose only reproducibility-safe configuration: adapter/version, provider identifier,
+effective endpoint, requested model, timeout and structured-output settings. Atlas retains these
+alongside instructions, JSON Schema, extraction contract (`atlas.extraction.v3`), GROBID projection
+version and passage-index version (`atlas.passage-index.v1`), as exact bytes with SHA-256.
+API keys, Authorization headers, response envelopes and hidden reasoning never enter configuration.
+Requested model identity stays in configuration; returned model identity stays in result provenance,
+so provider-resolved aliases need not equal the requested model. This does not pin immutable weights.
+
+The factory is a convenience for the two built-ins, not the extension mechanism. To support
+Anthropic, Gemini, Bedrock, Azure, vLLM, OpenRouter or future providers, implement `StructuredExtractor`
+and inject it directly; these providers do not currently have native Atlas adapters. A custom
+implementation supplies a safe `configuration` mapping and async `extract(instructions,
+document_text, schema)` returning `StructuredExtractionResult`. It must return exact final JSON
+bytes and safe model/tool identity, discard reasoning/envelopes, and use fixed safe error categories.
+No plugin framework, provider registry or application/domain changes are required:
+
+```python
+# custom_extractor implements StructuredExtractor; it need not use ProviderSettings or the factory.
+extraction = await extract_source_document(
+    PostgresExtractionPersistence(engine),
+    custom_extractor,
+    run_id=run_id,
+    source_id=source_id,
+    document_id=document_id,
+)
+```
 
 The operation verifies membership, screening and parent checksum, then projects namespaced TEI
 title/abstract/body into deterministic whitespace-normalized UTF-8 plain text (`grobid_text`).
@@ -161,25 +205,54 @@ derived retrieval context names its exact parent UUID and `atlas.grobid-text.v1`
 content identity safely deduplicates repeated projections; if multiple parents produce identical
 text, the retained version keeps the first projection's parent context.
 
-A running Extraction uses the persisted **text** document UUID. After all database connections
-close, the adapter issues one `/api/chat` request with `stream=false`, `think=false`, JSON Schema
-in `format`, and temperature 0. There is a bounded total timeout and no generation retry or redirect.
-The adapter requires `done` to be exactly `true`. If `done_reason` is supplied, it must be `stop`;
-omission is allowed on a completed response. Incomplete, length-limited or other non-normal
-completion fails before proposal validation, preserving any returned content string as exact bytes.
-The exact UTF-8 bytes of `message.content` are retained before schema/domain validation, rather than
-reserializing parsed JSON. The complete response envelope, hidden reasoning and arbitrary provider
-error bodies are discarded. Malformed JSON/schema returns `failed` with validation `failed`;
-empty/nonempirical proposals or inexact passages return `review_needed` with validation `failed`
-and review `pending`. Provider/transport/contract errors return `failed` with validation `pending`.
-Transport/status/missing-content errors fail
-without raw output; empty/whitespace content or content with mismatched model identity is retained
-as failed when a string was actually returned.
+The versioned passage index assigns `p0001`, `p0002`, ... in prepared block order and presents
+`[p0001] block text` separated by two newlines, with one terminal newline. Labels are model-input
+metadata, not stored document bytes. Rebuild with `build_passage_index(prepared_content,
+version=configuration["passage_index"])` to reproduce the model input. Each nonblank heading/prose
+block remains whole and exact; blocks over 20,000 Unicode characters fail before inference, without
+truncation or splitting. This is not context-budget management or document chunking.
+Findings return 1–20 distinct `evidence_passage_ids`; the model supplies no quotations or locators.
+Atlas resolves each ID locally to exact prepared text and uses that ID as the anchor locator.
+Unknown IDs and duplicate IDs within a Finding fail deterministic validation. Repeated source text
+in different blocks keeps distinct IDs; different Findings may cite the same passage.
 
-Only nested, bounded proposals with findings for every Study and exact passages may publish.
-Atlas generates all IDs and provenance. Unknown optional Study summaries map to empty strings in
-the existing string-valued domain contract. Persistence rechecks ownership and exact anchors,
-then atomically publishes Extraction/Studies/Findings, selects the extraction, and sets `extracted`.
+A running Extraction uses the persisted **text** document UUID. The provider call happens after
+database connections close. Both reference adapters make one generation request with a bounded
+total timeout, no automatic retry and no redirect following. They use existing `httpx`, not an LLM SDK.
+
+`OllamaExtractor` sends `/api/chat` with `stream=false`, `think=false`, JSON Schema in `format`,
+and temperature 0. It requires `done` exactly `true`; a supplied `done_reason` must be `stop`.
+It retains only exact `message.content` UTF-8 bytes, never thinking or the provider envelope.
+There is no model-family tuning, hardware assumption or context/chunking optimization.
+
+`OpenAIResponsesExtractor` sends `POST /v1/responses` at the default endpoint, with the explicit
+model, Atlas `instructions`, indexed document `input`, `store=false`, and strict JSON Schema under
+`text.format` (`type=json_schema`, `name=atlas_extraction`, `strict=true`, Atlas-generated schema).
+It supplies no tools, conversation/history state, temperature or model-specific reasoning parameters.
+The API key travels only in the Authorization header. Completed responses must contain one final
+assistant message with output text and a usable returned model identity. Reasoning and commentary
+items are discarded. Refusals, failed/noncompleted responses, malformed envelopes and empty output
+raise fixed safe `ExtractionProviderError` codes. Incomplete/failed responses may retain only their
+available final output-text bytes, never refusal explanations, arbitrary error bodies or reasoning.
+See the official [Responses Structured Outputs contract](https://developers.openai.com/api/docs/guides/structured-outputs).
+
+Contract v3 uses closed objects with every field required. Unknown scientific values are explicit
+nulls; empty collections are `[]`. Flexible `details` are at most 20 unique `{key, value}` entries,
+mapped locally into the existing Study/Finding dictionaries. This keeps one provider-neutral schema
+compatible with strict structured output, without vendor branching or changing stored domain records.
+
+Exact structured output bytes are retained before parsing, without reserializing JSON. Malformed
+JSON/schema returns `failed` with validation `failed`;
+empty/nonempirical proposals or unknown/duplicate passage IDs return `review_needed` with validation
+`failed` and review `pending`. Provider/transport/contract errors return `failed` with validation `pending`.
+Transport/HTTP failures retain no raw output. Completion/identity failures retain only available
+final text where the adapter failure contract permits it; missing content cannot create raw output.
+
+Only nested, bounded proposals with findings for every Study and known distinct passage IDs may publish.
+Atlas supplies exact evidence quotations, locators, record IDs and provenance. Unknown nullable Study
+summaries map to empty strings in the existing string-valued domain contract. Persistence rechecks
+ownership and exact anchors, then atomically publishes Extraction/Studies/Findings, selects the
+extraction, and sets `extracted`.
 The provider-neutral `ExtractionEligibilityChanged` condition identifies run/Source membership
 removal or screening exclusion at publication. It rolls back normalized evidence and records
 `review_needed` with validation `passed`, review `pending` and raw output. Unexpected publication
@@ -187,9 +260,13 @@ invariant/programming/database errors propagate; previously retained running
 attempt/raw bytes remain available for inspection. Each invocation creates a new attempt, not an
 automatic retry. Failed/review-needed attempts do not replace an existing accepted run selection.
 
+The stored `EvidenceAnchor` contract and persistence exact-byte validation are unchanged. Historical
+extractions, raw responses and accepted Findings remain readable without revalidation against the
+new proposal schema. No migration, relation or rewrite of historical output is needed.
+
 This slice validates structure and attribution; it does not certify scientific completeness or
 accuracy. Chunking/context-budget management, human review, synthesis-provider execution and
-broader research-run orchestration remain future work. Automated tests use mocks, never live Ollama.
+broader research-run orchestration remain future work. Automated tests use mocks, never live providers.
 
 ## Crossref
 

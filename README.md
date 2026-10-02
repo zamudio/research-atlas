@@ -30,10 +30,12 @@ exact immutable bytes, and atomically records the document and run-specific proc
 See [document acquisition](docs/providers.md#openalex-document-acquisition) for the callable.
 Atlas can now execute one document extraction: deterministic GROBID XML projection creates an
 immutable, anchorable text SourceDocument, then a structured-output provider supplies nested
-Study/Finding candidates. Validated exact passages publish atomically with run selection and
+Study/Finding candidates referencing deterministic passage IDs. Atlas resolves exact evidence
+locally, then publishes atomically with run selection and
 processing state. Exact structured model output is retained, without the provider envelope or
-hidden reasoning. The disposable local reference adapter uses Ollama and `qwen3.5:4b`; the model
-and endpoint are configurable. See [extraction execution](docs/providers.md#local-extraction-execution).
+hidden reasoning. Users explicitly choose their provider/model: Ollama and OpenAI Responses are
+reference adapters with no architectural default. Any custom `StructuredExtractor` can be injected
+directly; credentials stay runtime secrets. See [extraction execution](docs/providers.md#extraction-execution).
 SQLAlchemy Core, Psycopg and Alembic retain exactly 14 application relations. Concrete
 synthesis-provider execution, broader run orchestration and frontend/API remain future work. OpenAlex remains
 primary and Crossref optional;

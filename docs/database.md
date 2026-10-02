@@ -146,7 +146,7 @@ legacy caller-supplied evidence without raw output retains its existing digest i
 `record_extraction` and `publish_accepted_extraction` accept optional `raw_output` bytes.
 `publish_accepted_extraction(..., select_for_run=True)` additionally locks/rechecks membership and
 screening, selects the accepted extraction and sets `extracted` in the publication transaction.
-The [bounded execution callable](providers.md#local-extraction-execution) uses these existing
+The [bounded execution callable](providers.md#extraction-execution) uses these existing
 operations, retaining response bytes in a short transaction before parsing and publication.
 
 No new index or table is required: the existing run, relationship composite primary key and Finding
