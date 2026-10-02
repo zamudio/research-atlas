@@ -129,8 +129,9 @@ PDF fallback remains unimplemented. Run 001 is UNEXECUTED.
 `application.extraction.extract_source_document` executes one acquired GROBID XML document for
 an existing run/Source. Application code depends only on the `StructuredExtractor` protocol.
 Provider/model selection, credentials, HTTP requests and response parsing belong to infrastructure.
-Ollama is one local reference adapter; OpenAI Responses is one cloud reference adapter. Neither
-is the architectural default. The user must explicitly choose the provider and model.
+Native built-ins cover OpenAI, Anthropic, Gemini, Kimi, OpenRouter, DeepSeek and Ollama. A separate
+OpenAI-compatible Chat Completions adapter supports explicitly configured compatible endpoints.
+No adapter is the architectural default. The deployer must explicitly choose provider and model.
 
 ```python
 from research_atlas.application.extraction import extract_source_document
@@ -154,14 +155,51 @@ Generic runtime settings:
 
 | Environment variable | Behavior |
 | --- | --- |
-| `RESEARCH_ATLAS_EXTRACTION_PROVIDER` | Required when constructing through the built-in factory: `ollama` or `openai`. No default. |
+| `RESEARCH_ATLAS_EXTRACTION_PROVIDER` | Required factory identifier from the tables below. No default; never inferred from a model name. |
 | `RESEARCH_ATLAS_EXTRACTION_MODEL` | Explicit compatible model/tag chosen by the user. No default. |
-| `RESEARCH_ATLAS_EXTRACTION_BASE_URL` | Optional safe endpoint base. Selected Ollama defaults to `http://localhost:11434`; selected OpenAI defaults to `https://api.openai.com/v1`. |
-| `RESEARCH_ATLAS_EXTRACTION_API_KEY` | Runtime `SecretStr`: required for OpenAI, optional bearer authentication for Ollama. |
+| `RESEARCH_ATLAS_EXTRACTION_BASE_URL` | Optional native endpoint override; required for `openai_compatible`. Include the API prefix, without the operation suffix. |
+| `RESEARCH_ATLAS_EXTRACTION_API_KEY` | Legacy OpenAI credential fallback, optional Ollama bearer credential, or generic compatible fallback. Other native adapters never use this key. |
 | `RESEARCH_ATLAS_EXTRACTION_TIMEOUT_SECONDS` | Default 600; positive and at most 1800. |
+| `RESEARCH_ATLAS_EXTRACTION_MAX_OUTPUT_TOKENS` | Anthropic output budget: default 8192; positive and at most 131072. Choose a budget accepted by the explicitly selected model. |
+
+### Native built-ins
+
+| Identifier / adapter | Default base + operation | Runtime credential / authentication |
+| --- | --- | --- |
+| `openai` / `OpenAIResponsesExtractor` | `https://api.openai.com/v1` + `/responses` | `RESEARCH_ATLAS_OPENAI_API_KEY`; Bearer |
+| `anthropic` / `AnthropicExtractor` | `https://api.anthropic.com/v1` + `/messages` | `RESEARCH_ATLAS_ANTHROPIC_API_KEY`; `x-api-key` and `anthropic-version: 2023-06-01` |
+| `gemini` / `GeminiInteractionsExtractor` | `https://generativelanguage.googleapis.com/v1` + `/interactions` | `RESEARCH_ATLAS_GEMINI_API_KEY`; `x-goog-api-key` |
+| `kimi` / `KimiExtractor` | `https://api.moonshot.ai/v1` + `/chat/completions` | `RESEARCH_ATLAS_KIMI_API_KEY`; Bearer |
+| `openrouter` / `OpenRouterExtractor` | `https://openrouter.ai/api/v1` + `/chat/completions` | `RESEARCH_ATLAS_OPENROUTER_API_KEY`; Bearer |
+| `deepseek` / `DeepSeekResponsesExtractor` | `https://api.deepseek.com` + `/responses` | `RESEARCH_ATLAS_DEEPSEEK_API_KEY`; Bearer |
+| `ollama` / `OllamaExtractor` | `http://localhost:11434` + `/api/chat` | Optional `RESEARCH_ATLAS_EXTRACTION_API_KEY`; Bearer |
+
+Every cloud native adapter requires its selected credential at construction. All extraction secrets
+use `SecretStr` in infrastructure. A nonblank provider-specific OpenAI key takes precedence over
+the legacy key; blank example variables do not hide an existing legacy credential. Unselected
+providers need no credentials. The existing OpenAlex key and discovery configuration are unchanged.
+Native API support does not mean every model offered by that provider accepts structured output
+or every schema keyword; explicitly select a model supporting the documented request contract.
+
+### Generic compatible endpoint
+
+`openai_compatible` constructs `OpenAICompatibleChatExtractor`, separate from native OpenAI.
+Set an explicit model and `RESEARCH_ATLAS_EXTRACTION_BASE_URL`, including the endpoint's API
+prefix; Atlas appends `/chat/completions`. Configure `RESEARCH_ATLAS_OPENAI_COMPATIBLE_API_KEY`
+when authentication is needed (Bearer); it takes precedence over the legacy generic key.
+Unauthenticated local endpoints are allowed. The adapter sends one system instruction and one
+indexed user document, `stream=false`, and `response_format.type=json_schema` with a named schema,
+`strict=true`, and the canonical Atlas schema. There are no tools, history, retries, response healing
+or downgrades to `json_object`. Unsupported parameters, malformed envelopes and non-JSON-object
+outputs fail explicitly. Exact final bytes still undergo canonical application validation.
+
+This path may work with xAI, Mistral, Together, Fireworks, Groq, Cerebras, vLLM,
+and similar services **only when the configured endpoint and model accept this exact strict
+JSON-Schema contract**. General OpenAI compatibility is insufficient; these are not native Atlas
+built-ins or verified support claims.
 
 `ProviderSettings` still loads for discovery/acquisition without extraction configuration. The
-factory rejects absent provider/model, unknown built-in providers, and missing OpenAI credentials
+factory rejects absent provider/model, unknown built-in providers, and missing selected credentials
 when construction is requested. Direct adapter construction also requires an explicit model.
 The previous Ollama-specific base URL setting is replaced by the generic extraction base URL.
 Base URLs cannot contain userinfo, query strings or fragments. When sending a configured credential,
@@ -178,9 +216,15 @@ API keys, Authorization headers, response envelopes and hidden reasoning never e
 Requested model identity stays in configuration; returned model identity stays in result provenance,
 so provider-resolved aliases need not equal the requested model. This does not pin immutable weights.
 
-The factory is a convenience for the two built-ins, not the extension mechanism. To support
-Anthropic, Gemini, Bedrock, Azure, vLLM, OpenRouter or future providers, implement `StructuredExtractor`
-and inject it directly; these providers do not currently have native Atlas adapters. A custom
+The factory is convenience only. A contributor adds another provider by:
+
+1. Implementing `StructuredExtractor` in infrastructure.
+2. Keeping credentials in infrastructure, never in domain/application models or retained configuration.
+3. Returning `StructuredExtractionResult` with exact final JSON UTF-8 bytes and safe model/tool identity.
+4. Discarding provider envelopes, reasoning, diagnostics and refusal explanations; using fixed safe errors.
+5. Optionally adding the adapter to the built-in factory and testing its verified wire contract.
+
+No domain/application changes are necessary. Direct injection remains independent of the factory. A custom
 implementation supplies a safe `configuration` mapping and async `extract(instructions,
 document_text, schema)` returning `StructuredExtractionResult`. It must return exact final JSON
 bytes and safe model/tool identity, discard reasoning/envelopes, and use fixed safe error categories.
@@ -217,7 +261,7 @@ Unknown IDs and duplicate IDs within a Finding fail deterministic validation. Re
 in different blocks keeps distinct IDs; different Findings may cite the same passage.
 
 A running Extraction uses the persisted **text** document UUID. The provider call happens after
-database connections close. Both reference adapters make one generation request with a bounded
+database connections close. All built-in adapters make one generation request with a bounded
 total timeout, no automatic retry and no redirect following. They use existing `httpx`, not an LLM SDK.
 
 `OllamaExtractor` sends `/api/chat` with `stream=false`, `think=false`, JSON Schema in `format`,
@@ -235,6 +279,81 @@ items are discarded. Refusals, failed/noncompleted responses, malformed envelope
 raise fixed safe `ExtractionProviderError` codes. Incomplete/failed responses may retain only their
 available final output-text bytes, never refusal explanations, arbitrary error bodies or reasoning.
 See the official [Responses Structured Outputs contract](https://developers.openai.com/api/docs/guides/structured-outputs).
+
+`AnthropicExtractor` uses native Messages with `system`, one user document, `stream=false`,
+bounded `max_tokens`, and `output_config.format={type: json_schema, schema: ...}` (not the retired
+beta `output_format`). Normal completion requires `stop_reason=end_turn` and no stop sequence.
+Only text blocks survive; thinking/redacted thinking are discarded, and refusals retain no text.
+The adapter-local `atlas.anthropic-schema.v1` projection moves unsupported string lengths and array
+upper bounds into descriptions (and `minItems` greater than one, if present). It preserves types,
+required fields, closed objects, internal references, nullable branches and patterns. The original
+schema is never mutated, and Atlas still enforces **every canonical constraint** after the response.
+This projection does not promise provider-side enforcement of the removed bounds. See official
+[Anthropic structured outputs](https://platform.claude.com/docs/en/build-with-claude/structured-outputs).
+
+`GeminiInteractionsExtractor` uses the stable v1 Interactions contract, `system_instruction`,
+one `user_input` step containing the indexed text, `store=false`, `background=false`, `stream=false`,
+and `response_format={type: text, mime_type: application/json, schema: ...}`. The versioned
+provider-local `atlas.gemini-schema.v1` projection moves `minLength`, `maxLength` and `pattern`
+into the affected schema node's description in a deterministic order for Gemini's documented
+JSON-Schema subset. Array `minItems`/`maxItems`, object properties/required fields/closure,
+`anyOf`, internal `$ref`/`$defs`, titles and existing descriptions remain intact. The adapter records
+`schema_transform` in its safe configuration. It never mutates the canonical schema, and Atlas
+still applies **every canonical constraint** after the response. See official
+[Gemini Structured Outputs](https://ai.google.dev/gemini-api/docs/structured-output).
+It requires a completed interaction and retains only text from the last `model_output` step.
+Thought summaries, other steps, interaction IDs and server state are never retained or reused.
+Failed/cancelled interactions retain
+no output because their text may be safety/refusal explanations. If the optional returned model
+field is absent, provenance uses the explicitly requested identity. See official
+[Gemini v1 Interactions](https://ai.google.dev/api/interactions-api-v1).
+
+`KimiExtractor` uses native Moonshot Chat Completions with Bearer authentication from its own
+`RESEARCH_ATLAS_KIMI_API_KEY`; there is no fallback to another provider's credential. It sends
+one system instruction and one indexed user document, `stream=false`, and a named
+`response_format.json_schema` with `name=atlas_extraction` and `strict=true`. The deployer chooses
+the compatible Kimi model explicitly; Atlas never defaults to K3 or another model. Only
+`choices[0].message.content` from one normally stopped assistant choice becomes exact UTF-8
+output. Reasoning content/details, diagnostics and envelope fields are discarded. The supplied
+returned model identity is retained even when it differs from the requested alias; an absent
+model field uses the explicitly requested identity. No tools, history, retries, redirects,
+fallbacks or response healing are added. See official [Kimi Chat API](https://platform.kimi.ai/docs/api/chat),
+[Structured Output / MFJS](https://platform.kimi.ai/docs/guide/response_format) and
+[Kimi K3 structured output](https://platform.kimi.ai/docs/guide/kimi-k3-quickstart).
+
+Atlas's current schema has the object/array/nullable/reference structure accepted by Moonshot's
+strict validator. Inspection of the official [walle keyword model](https://github.com/MoonshotAI/walle/blob/main/model.go)
+and [constraint validators](https://github.com/MoonshotAI/walle/blob/main/keyword_validators.go)
+shows support for titles, descriptions, string lengths and array bounds, while `pattern` is
+classified as future support. Acceptance of that keyword by the validator does not establish
+provider-side regex enforcement. To avoid relying on it, the minimal `atlas.kimi-schema.v1`
+projection moves only `pattern` into the affected description as `Atlas constraints: pattern=...`.
+String `minLength`/`maxLength`, array `minItems`/`maxItems`, properties, required fields, closed
+objects, `anyOf`, internal `$ref`/`$defs`, titles and existing descriptions stay intact. Safe
+configuration records `schema_transform`; the canonical schema is never mutated and Atlas still
+enforces every canonical constraint after the response. This is a source audit and offline
+contract check; it adds no runtime walle dependency or live Kimi request.
+
+`OpenRouterExtractor` uses the native OpenRouter endpoint and strict Chat schema, with
+`provider.require_parameters=true` and `provider.allow_fallbacks=false`. There is one requested model,
+no plugins, response healing, web search or multi-model routing. It accepts one normally stopped
+assistant choice and discards reasoning and native diagnostics. See official
+[OpenRouter structured outputs](https://openrouter.ai/docs/guides/features/structured-outputs) and
+[provider routing](https://openrouter.ai/docs/guides/routing/provider-selection).
+
+`DeepSeekResponsesExtractor` is a separate native adapter with its own status/error policy.
+It uses `/responses`, instructions, indexed input, `stream=false`, and `text.format` with a named
+JSON Schema. DeepSeek documents `json_schema` enforcement without a `strict` switch in that format.
+Its API is stateless; `store`/conversation parameters are unsupported, so Atlas does not send or rely
+on them. It discards reasoning and requires completed response/message status. Refusals and
+content-filter completions retain no output; incomplete/failed responses can retain only available
+final text. See official [DeepSeek Responses](https://api-docs.deepseek.com/api/create-response/) and
+[compatibility details](https://api-docs.deepseek.com/guides/responses_api/).
+
+These contracts were checked against official documentation on 2026-10-02. Tests use only
+`httpx.MockTransport`: successful proposals from all eight factory adapters flow through the same
+`extract_source_document` operation to Atlas-resolved exact passage anchors. This is offline
+contract validation, not a live certification of individual provider/model deployments.
 
 Contract v3 uses closed objects with every field required. Unknown scientific values are explicit
 nulls; empty collections are `[]`. Flexible `details` are at most 20 unique `{key, value}` entries,

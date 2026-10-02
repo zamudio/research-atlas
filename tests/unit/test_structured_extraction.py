@@ -35,7 +35,19 @@ def test_settings_load_for_discovery_without_extraction(monkeypatch: pytest.Monk
         create_structured_extractor(settings)
 
 
-@pytest.mark.parametrize("provider", ["ollama", "openai"])
+@pytest.mark.parametrize(
+    "provider",
+    [
+        "ollama",
+        "openai",
+        "anthropic",
+        "gemini",
+        "kimi",
+        "openrouter",
+        "deepseek",
+        "openai_compatible",
+    ],
+)
 @pytest.mark.parametrize("model", [None, "", " \t"])
 def test_model_required_only_at_construction(provider: str, model: str | None) -> None:
     settings = ProviderSettings(extraction_provider=provider, extraction_model=model)
