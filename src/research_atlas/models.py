@@ -53,3 +53,10 @@ class SourceEvidence:
     source: Source
     content_sha256: str
     evidence: tuple[Evidence, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class EvidenceReview:
+    question: str
+    reviewed_sources: int
+    sources: tuple[SourceEvidence, ...]

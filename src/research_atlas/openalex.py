@@ -22,6 +22,10 @@ _last_semantic_start = 0.0
 class OpenAlexError(Exception):
     """Safe local error code without provider responses or request credentials."""
 
+    def __init__(self, code: str) -> None:
+        self.code = code
+        super().__init__(code)
+
 
 class _WireModel(BaseModel):
     model_config = ConfigDict(strict=True, extra="ignore")

@@ -11,11 +11,9 @@ The intended flow is:
 
 The current core:
 
-- Searches scholarly literature with OpenAlex, including semantic search.
-- Retrieves usable cached GROBID XML content.
-- Extracts evidence specifically relevant to the supplied question.
+- Orchestrates OpenAlex semantic search → content acquisition → question-aware extraction.
 - Grounds evidence in exact passages from deterministic source-text projection.
-- Uses a user-selected structured model and returns paper-level evidence to callers.
+- Uses a user-selected structured model and returns an in-memory evidence review.
 
 ## Setup
 
@@ -29,7 +27,7 @@ except on loopback. Set `RESEARCH_ATLAS_MODEL_BASE_URL` for a compatible endpoin
 ## Current API
 
 ```python
-from research_atlas import extract_evidence
+from research_atlas import collect_evidence
 from research_atlas.config import ProviderSettings
 from research_atlas.openalex import OpenAlex
 from research_atlas.providers.factory import create_structured_model
@@ -39,31 +37,34 @@ literature = OpenAlex(settings.openalex_api_key)
 model = create_structured_model(settings)
 
 # Inside an async function:
-sources = await literature.search("learner model response time", limit=10)
-if sources:
-    source = sources[0]
-    content = await literature.fetch_content(source)
-    if content is not None:
-        result = await extract_evidence(
-            question="What does response time tell us about learning?",
-            source=source,
-            content=content,
-            model=model,
-        )
+review = await collect_evidence(
+    "What signals should I track in a learner model to understand learning?",
+    literature=literature,
+    model=model,
+)
+
+print(review.reviewed_sources)
+for source_result in review.sources:
+    print(source_result.source.title)
+    for evidence in source_result.evidence:
+        print(evidence.summary)
 ```
 
-`search` returns a tuple of `Source` objects (up to 200 results; 50 with
-`semantic=True`). `fetch_content` returns XML bytes, or `None` for unavailable
-content; other failures raise `OpenAlexError` with a safe local code.
-`extract_evidence` accepts a nonblank question of at most 8,000 characters and
-returns frozen `SourceEvidence`: the source, SHA-256 of the input XML, and evidence
-containing summaries, exact projected passages, context, and limitations. An
-irrelevant paper can return an empty evidence tuple. Invalid structured output or
-passage references raise validation errors. Relevance and interpretation depend
-on the selected model; passage lookup guarantees the quoted text.
+`collect_evidence` preserves the exact nonblank question (at most 2,000 characters)
+and reviews up to `max_sources` usable papers sequentially (default 20; allowed
+1–50). One semantic search requests up to twice that many candidates, capped at 50.
+The frozen `EvidenceReview.reviewed_sources` counts usable papers assessed even
+when they yielded no relevant evidence; `sources` contains only evidence-bearing
+`SourceEvidence` objects in search order. Evidence includes summaries, exact
+projected passages, context, and limitations, with the source and input XML checksum.
 
-Everything runs in memory. Whole-review orchestration and cross-paper synthesis
-are not implemented. A custom model only needs an async
+Missing, unusable, or oversized content is skipped. Other OpenAlex errors expose
+a safe local `OpenAlexError.code` and propagate, as do model failures and invalid
+structured output or passage references. Relevance and interpretation depend on
+the selected model; passage lookup guarantees the quoted text.
+
+Everything runs in memory. Cross-paper synthesis and an actionable final answer
+are not implemented yet. A custom model only needs an async
 `generate(instructions, input_text, schema) -> bytes` method.
 
 ## Verification
