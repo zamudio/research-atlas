@@ -1,19 +1,23 @@
 # Research Atlas
 
-Research Atlas is a lightweight tool for turning a research question into
-evidence-grounded, actionable guidance from scholarly literature.
+Research Atlas helps you find what the research actually says—and what to do with it.
+Ask a question, search the scholarly literature, extract the evidence that matters, and turn it into useful guidance.
 
-The intended flow is:
+The intended experience is:
 `question → scholarly search → relevant evidence → synthesis → useful answer`
 
-> What signals should I track in a learner model to understand learning, and what
-> does the research actually support?
+## Examples
 
-The current core:
+- What signals should I track in a learner model to understand learning, and what
+  does the research actually support?
+- How much can trees cool a city during a heat wave?
+- Can concrete made with recycled materials stay strong and durable?
 
-- Orchestrates OpenAlex semantic search → content acquisition → question-aware extraction.
-- Grounds evidence in exact passages from deterministic source-text projection.
-- Uses a user-selected structured model and returns an in-memory evidence review.
+## Current capabilities
+
+- Searches scholarly literature with OpenAlex and retrieves available paper content.
+- Finds evidence relevant to your question and ties it to exact source passages.
+- Returns your review in memory using the model you choose.
 
 ## Setup
 
@@ -50,23 +54,36 @@ for source_result in review.sources:
         print(evidence.summary)
 ```
 
-`collect_evidence` preserves the exact nonblank question (at most 2,000 characters)
-and reviews up to `max_sources` usable papers sequentially (default 20; allowed
-1–50). One semantic search requests up to twice that many candidates, capped at 50.
-The frozen `EvidenceReview.reviewed_sources` counts usable papers assessed even
-when they yielded no relevant evidence; `sources` contains only evidence-bearing
-`SourceEvidence` objects in search order. Evidence includes summaries, exact
-projected passages, context, and limitations, with the source and input XML checksum.
+### What `collect_evidence()` does
 
-Missing or oversized content is skipped. Malformed or unusable GROBID XML raises
-`ValueError` during extraction. Other OpenAlex errors expose
-a safe local `OpenAlexError.code` and propagate, as do model failures and invalid
-structured output or passage references. Relevance and interpretation depend on
-the selected model; passage lookup guarantees the quoted text.
+- Uses your question unchanged for semantic scholarly search. Questions
+  must be nonblank and at most 2,000 characters.
+- Reviews up to `max_sources` papers sequentially (default 20; allowed 1–50).
+- Finds relevant evidence in each paper with available content.
+
+### What comes back
+
+The returned `EvidenceReview` contains:
+
+- `question`: the original research question.
+- `reviewed_sources`: the number of usable papers actually reviewed, including
+  those that yielded no relevant evidence.
+- `sources`: only papers that contributed evidence, in search order. Each includes
+  source details and evidence summaries with exact supporting passages, context,
+  and limitations.
+
+### Availability and failures
+
+Missing or oversized paper content is skipped. Malformed or unusable GROBID XML
+raises `ValueError` during extraction. Other retrieval errors, model failures,
+invalid structured output, and invalid passage references also propagate.
+Relevance and interpretation depend on the model you choose; supporting passages
+are exact source text.
+
+### Current scope
 
 Everything runs in memory. Cross-paper synthesis and an actionable final answer
-are not implemented yet. A custom model only needs an async
-`generate(instructions, input_text, schema) -> bytes` method.
+are not implemented yet.
 
 ## Verification
 
