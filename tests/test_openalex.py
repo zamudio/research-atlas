@@ -204,7 +204,18 @@ def test_content_status_and_retry_policy(code: int) -> None:
     assert delays == ([20, 20] if calls == 3 else [])
 
 
-@pytest.mark.parametrize("fault", ["transport", "timeout", "empty", "xml", "dtd", "size"])
+@pytest.mark.parametrize("body", [b"not XML", b"<TEI", b"<TEI/>", b"<!DOCTYPE a><a/>"])
+def test_content_returns_bytes_without_xml_validation(body: bytes) -> None:
+    async def scenario() -> None:
+        async with httpx.AsyncClient(
+            transport=httpx.MockTransport(lambda _: httpx.Response(200, content=body))
+        ) as client:
+            assert await OpenAlex(KEY, client).fetch_content(SOURCE) == body
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("fault", ["transport", "timeout", "empty", "size"])
 def test_content_safety_and_bounds(fault: str, monkeypatch: pytest.MonkeyPatch) -> None:
     calls = 0
     monkeypatch.setattr(module, "MAX_CONTENT_BYTES", 256)
@@ -223,8 +234,7 @@ def test_content_safety_and_bounds(fault: str, monkeypatch: pytest.MonkeyPatch) 
             raise httpx.ReadTimeout("private-key", request=request)
         if fault == "size":
             return httpx.Response(200, stream=Chunks())
-        bodies = {"empty": b"", "xml": b"<TEI/>", "dtd": b"<!DOCTYPE a><a/>"}
-        return httpx.Response(200, content=bodies[fault])
+        return httpx.Response(200, content=b"")
 
     async def scenario() -> None:
         async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:

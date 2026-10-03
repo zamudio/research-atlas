@@ -8,9 +8,11 @@ import httpx
 import pytest
 from pydantic import ValidationError
 
+import research_atlas.extraction as extraction_module
 import research_atlas.openalex as openalex_module
 from research_atlas import EvidenceReview, collect_evidence
 from research_atlas.extraction import EXTRACTION_INSTRUCTIONS, ExtractionProposal
+from research_atlas.grobid import project_grobid
 from research_atlas.openalex import OpenAlex, OpenAlexError
 from research_atlas.providers import ModelProviderError
 from tests.test_extraction import OTHER, PASSAGE, XML, proposal_bytes
@@ -75,8 +77,19 @@ async def review_with_transport(
         )
 
 
-def test_whole_flow_preserves_question_and_returns_grounded_evidence() -> None:
+def test_whole_flow_preserves_question_and_returns_grounded_evidence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     events: list[str] = []
+    projections: list[bytes] = []
+
+    def project(content: bytes) -> bytes:
+        projections.append(content)
+        return project_grobid(content)
+
+    monkeypatch.setattr(extraction_module, "project_grobid", project)
+    # Also catch a regression that restores the old acquisition-side import/call.
+    monkeypatch.setattr(openalex_module, "project_grobid", project, raising=False)
 
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.host == "api.openalex.org":
@@ -102,13 +115,14 @@ def test_whole_flow_preserves_question_and_returns_grounded_evidence() -> None:
     assert model.questions == [QUESTION]
     assert model.documents == [f"[p0001] {PASSAGE}\n\n[p0002] {OTHER}\n"]
     assert events == ["search", "fetch W2", "extract", "extracted"]
+    assert projections == [XML]
     assert [field.name for field in fields(review)] == ["question", "reviewed_sources", "sources"]
     assert not hasattr(review, "__dict__")
     with pytest.raises(FrozenInstanceError):
         review.question = "changed"  # pyright: ignore[reportAttributeAccessIssue]
 
 
-@pytest.mark.parametrize("fault", ["missing", "malformed", "unusable", "oversized"])
+@pytest.mark.parametrize("fault", ["missing", "oversized"])
 def test_unavailable_content_is_skipped_and_next_candidate_reviewed(
     fault: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -123,12 +137,7 @@ def test_unavailable_content_is_skipped_and_next_candidate_reviewed(
         if request.url.path == "/works/W1.grobid-xml":
             if fault == "missing":
                 return httpx.Response(404)
-            bodies = {
-                "malformed": b"<TEI",
-                "unusable": b'<TEI xmlns="http://www.tei-c.org/ns/1.0"/>',
-                "oversized": b"x" * (len(XML) + 1),
-            }
-            return httpx.Response(200, content=bodies[fault])
+            return httpx.Response(200, content=b"x" * (len(XML) + 1))
         return httpx.Response(200, content=XML)
 
     model = ReviewModel()
@@ -137,6 +146,23 @@ def test_unavailable_content_is_skipped_and_next_candidate_reviewed(
     assert tuple(result.source.key for result in review.sources) == ("W2",)
     assert model.questions == [QUESTION]
     assert fetched == ["/works/W1.grobid-xml", "/works/W2.grobid-xml"]
+
+
+@pytest.mark.parametrize("content", [b"<TEI", b'<TEI xmlns="http://www.tei-c.org/ns/1.0"/>'])
+def test_unusable_grobid_propagates_during_extraction(content: bytes) -> None:
+    fetched: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.host == "api.openalex.org":
+            return httpx.Response(200, json={"results": [{"id": "W1"}, {"id": "W2"}]})
+        fetched.append(request.url.path)
+        return httpx.Response(200, content=content)
+
+    model = ReviewModel(())
+    with pytest.raises(ValueError):
+        asyncio.run(review_with_transport(handler, model))
+    assert model.questions == []
+    assert fetched == ["/works/W1.grobid-xml"]
 
 
 def test_irrelevant_paper_counts_toward_bound_without_contributing_evidence() -> None:

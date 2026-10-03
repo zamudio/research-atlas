@@ -10,7 +10,6 @@ from time import monotonic
 import httpx
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, ValidationError
 
-from research_atlas.grobid import project_grobid
 from research_atlas.models import Source
 
 MAX_CONTENT_BYTES = 32 * 1024 * 1024
@@ -125,20 +124,14 @@ class OpenAlex:
             raise OpenAlexError("malformed_search_response") from None
 
     async def fetch_content(self, source: Source) -> bytes | None:
-        """Return validated cached GROBID XML; None means OpenAlex returned 404."""
+        """Return bounded cached GROBID XML bytes; None means OpenAlex returned 404."""
         if self._key is None or not self._key.get_secret_value().strip():
             raise OpenAlexError("missing_api_key")
-        content = await self._get(
+        return await self._get(
             f"https://content.openalex.org/works/{source.openalex_id}.grobid-xml",
             bound=MAX_CONTENT_BYTES,
             allow_missing=True,
         )
-        if content is not None:
-            try:
-                project_grobid(content)
-            except ValueError:
-                raise OpenAlexError("unusable_grobid_xml") from None
-        return content
 
     async def _get(
         self,

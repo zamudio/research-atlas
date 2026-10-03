@@ -182,3 +182,21 @@ def test_question_validation_precedes_model_call(question: str) -> None:
     with pytest.raises(ValueError, match="question"):
         asyncio.run(extract_evidence(question=question, source=SOURCE, content=XML, model=model))
     assert model.calls == 0
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        b"<TEI",
+        b"<TEI/>",
+        b'<TEI xmlns="http://www.tei-c.org/ns/1.0"/>',
+        b"<!DOCTYPE a><a/>",
+    ],
+)
+def test_unusable_grobid_fails_before_model_call(content: bytes) -> None:
+    model = FakeModel(proposal_bytes())
+    with pytest.raises(ValueError):
+        asyncio.run(
+            extract_evidence(question="Question?", source=SOURCE, content=content, model=model)
+        )
+    assert model.calls == 0

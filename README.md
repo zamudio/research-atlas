@@ -58,7 +58,8 @@ when they yielded no relevant evidence; `sources` contains only evidence-bearing
 `SourceEvidence` objects in search order. Evidence includes summaries, exact
 projected passages, context, and limitations, with the source and input XML checksum.
 
-Missing, unusable, or oversized content is skipped. Other OpenAlex errors expose
+Missing or oversized content is skipped. Malformed or unusable GROBID XML raises
+`ValueError` during extraction. Other OpenAlex errors expose
 a safe local `OpenAlexError.code` and propagate, as do model failures and invalid
 structured output or passage references. Relevance and interpretation depend on
 the selected model; passage lookup guarantees the quoted text.

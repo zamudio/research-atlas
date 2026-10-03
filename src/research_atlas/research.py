@@ -26,7 +26,7 @@ async def collect_evidence(
         try:
             content = await literature.fetch_content(source)
         except OpenAlexError as error:
-            if error.code in {"unusable_grobid_xml", "content_size_exceeded"}:
+            if error.code == "content_size_exceeded":
                 continue
             raise
         if content is None:
