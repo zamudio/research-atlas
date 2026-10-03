@@ -5,24 +5,17 @@ build-backend = "hatchling.build"
 [project]
 name = "research-atlas"
 version = "0.6.0"
-description = "Provider-neutral discovery for evidence-backed research."
+description = "Turn scholarly literature into evidence-grounded, actionable answers."
 readme = "README.md"
 requires-python = ">=3.14,<3.15"
 dependencies = [
   "httpx>=0.28,<1",
   "pydantic>=2.10,<3",
   "pydantic-settings>=2.7,<3",
-  "psycopg[binary]>=3.2,<4",
-  "pyyaml>=6.0,<7",
-  "sqlalchemy[asyncio]>=2.0,<2.1",
 ]
-
-[project.scripts]
-research-atlas-dry-run = "research_atlas.cli.dry_run:main"
 
 [dependency-groups]
 dev = [
-  "alembic>=1.20,<2",
   "pyright>=1.1.390,<2",
   "pytest>=8.3,<9",
   "ruff>=0.9,<1",

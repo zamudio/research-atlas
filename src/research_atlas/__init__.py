@@ -1,3 +1,6 @@
-"""Reusable, provenance-first evidence infrastructure."""
+"""In-memory scholarly search and question-relevant evidence extraction."""
 
-__version__ = "0.6.0"
+from research_atlas.extraction import extract_evidence
+from research_atlas.models import Evidence, Source, SourceEvidence
+
+__all__ = ["Evidence", "Source", "SourceEvidence", "extract_evidence"]

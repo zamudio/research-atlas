@@ -13,11 +13,4 @@ build/
 .idea/
 .vscode/
 
-# Research source material and generated working data stay outside Git.
-data/
-corpora/
-pdfs/
-raw/
-tmp/
-exports/
-*.pdf
+.codex-local/
