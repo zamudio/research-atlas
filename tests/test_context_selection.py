@@ -7,6 +7,7 @@ import httpx
 import pytest
 
 import research_atlas.content as content_module
+import research_atlas.openalex as openalex_module
 import research_atlas.passages as passages_module
 from research_atlas import collect_evidence, extract_evidence
 from research_atlas.embeddings import EmbeddingError
@@ -21,7 +22,7 @@ from research_atlas.passages import (
 )
 from tests.test_embeddings import FakeEmbedder
 from tests.test_extraction import SOURCE, XML, FakeModel, proposal_bytes
-from tests.test_openalex import KEY
+from tests.test_openalex import KEY, no_sleep
 
 
 def paper(blocks: tuple[str, ...]) -> bytes:
@@ -248,7 +249,10 @@ def test_large_paper_unrelated_embedding_errors_propagate(error: Exception) -> N
     assert model.calls == 0
 
 
-def test_review_shares_embedder_across_discovery_and_large_paper_extraction() -> None:
+def test_semantic_review_uses_embedder_only_for_large_paper_extraction(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(openalex_module, "_pace_semantic", lambda: no_sleep(0))
     content, passage_embedder = large_paper()
     calls: list[tuple[str, ...]] = []
     visible: list[str] = []
@@ -256,7 +260,7 @@ def test_review_shares_embedder_across_discovery_and_large_paper_extraction() ->
     class SharedEmbedder:
         async def embed(self, texts: tuple[str, ...]) -> tuple[tuple[float, ...], ...]:
             calls.append(texts)
-            return ((1, 0), (1, 0)) if len(texts) == 2 else passage_embedder.vectors
+            return passage_embedder.vectors
 
     class Model:
         async def generate(
@@ -268,8 +272,9 @@ def test_review_shares_embedder_across_discovery_and_large_paper_extraction() ->
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.host == "api.openalex.org":
             assert request.url.path == "/works"
-            assert request.url.params["search"] == "question"
-            assert "search.semantic" not in request.url.params
+            assert request.url.params["search.semantic"] == "question"
+            assert "search" not in request.url.params
+            assert request.url.params["filter"] == "has_fulltext:true"
             return httpx.Response(
                 200,
                 json={
@@ -299,8 +304,8 @@ def test_review_shares_embedder_across_discovery_and_large_paper_extraction() ->
             assert result.sources[0].evidence[0].passages[0].startswith("Strong learning result.")
 
     asyncio.run(scenario())
-    assert len(calls) == 2
-    assert calls[0] == ("question", "Learning")
+    assert len(calls) == 1
+    assert len(calls[0]) == len(passage_embedder.vectors)
     assert all(texts[0] == "question" for texts in calls)
     assert len(visible) == 1 and len(visible[0]) <= PAPER_CONTEXT_CHARACTERS
 

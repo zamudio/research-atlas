@@ -93,7 +93,10 @@ def test_doi_is_citation_metadata_only(doi: str) -> None:
     assert source.doi == "10.1234/abc"
 
 
-def test_semantic_request_uses_provider_ranking_and_pacing(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize("limit", [1, 20, module.NATIVE_SEMANTIC_LIMIT])
+def test_semantic_request_uses_provider_ranking_and_pacing(
+    limit: int, monkeypatch: pytest.MonkeyPatch
+) -> None:
     waits = 0
 
     async def pace() -> None:
@@ -101,9 +104,12 @@ def test_semantic_request_uses_provider_ranking_and_pacing(monkeypatch: pytest.M
         waits += 1
 
     monkeypatch.setattr(module, "_pace_semantic", pace)
+    question = "  Does spending time outside reduce stress?\n"
 
     def handler(request: httpx.Request) -> httpx.Response:
-        assert request.url.params["search.semantic"] == "learning"
+        assert request.url.params["search.semantic"] == question
+        assert request.url.params["filter"] == "has_fulltext:true"
+        assert int(request.url.params["per_page"]) == limit <= module.NATIVE_SEMANTIC_LIMIT
         assert "search" not in request.url.params and "cursor" not in request.url.params
         return httpx.Response(
             200,
@@ -111,14 +117,14 @@ def test_semantic_request_uses_provider_ranking_and_pacing(monkeypatch: pytest.M
                 "results": [
                     {"id": "W2", "has_content": {"pdf": True}},
                     {"id": "W1", "has_content": {"pdf": True}},
-                ]
+                ][:limit]
             },
         )
 
     async def scenario() -> None:
         async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-            sources = await OpenAlex(client=client).search("learning", semantic=True)
-            assert [source.source.key for source in sources] == ["W2", "W1"]
+            sources = await OpenAlex(client=client).search(question, limit=limit, semantic=True)
+            assert [source.source.key for source in sources] == ["W2", "W1"][:limit]
 
     asyncio.run(scenario())
     assert waits == 1

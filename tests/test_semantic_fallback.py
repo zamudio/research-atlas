@@ -27,6 +27,7 @@ def test_successful_native_semantics_never_uses_embeddings_or_fallback(empty: bo
         nonlocal calls
         calls += 1
         assert "search.semantic" in request.url.params
+        assert request.url.params["filter"] == "has_fulltext:true"
         assert "abstract_inverted_index" not in request.url.params["select"]
         return httpx.Response(
             200,
@@ -65,30 +66,58 @@ def test_supported_routes_filter_before_ranking_and_preserve_native_order(
         nonlocal calls
         calls += 1
         assert request.url.host == "api.openalex.org" and request.url.path == "/works"
-        assert "filter" not in request.url.params
+        if "search.semantic" in request.url.params:
+            assert request.url.params["filter"] == "has_fulltext:true"
+        else:
+            assert "filter" not in request.url.params
         fields = set(request.url.params["select"].split(","))
         assert {"id", "has_content", "best_oa_location", "primary_location", "locations"} <= fields
         if strategy == "fallback" and "search.semantic" in request.url.params:
             return httpx.Response(401)
         # This invalid abstract must never be constructed into ranking input.
         works: list[dict[str, object]] = [
-            {"id": "W9", "title": "Unreadable", "abstract_inverted_index": {"bad": [-1]}},
-            {"id": "W8", "has_content": {"grobid_xml": False, "pdf": False}},
+            {
+                "id": "W9",
+                "title": "Unreadable",
+                "has_fulltext": True,
+                "abstract_inverted_index": {"bad": [-1]},
+            },
+            {
+                "id": "W8",
+                "has_fulltext": True,
+                "has_content": {"grobid_xml": False, "pdf": False},
+            },
             {
                 "id": "W7",
+                "has_fulltext": True,
                 "best_oa_location": {"is_oa": True, "landing_page_url": "https://oa.test/landing"},
             },
-            {"id": "W6", "locations": [{"is_oa": False, "pdf_url": "https://closed.test/pdf"}]},
+            {
+                "id": "W6",
+                "has_fulltext": True,
+                "locations": [{"is_oa": False, "pdf_url": "https://closed.test/pdf"}],
+            },
         ]
         if eligible:
             works[1:1] = [
-                {"id": "W3", "title": "GROBID", "has_content": {"grobid_xml": True}},
+                {
+                    "id": "W3",
+                    "title": "GROBID",
+                    "has_content": {"grobid_xml": True},
+                    "relevance_score": 0.01,
+                },
                 {
                     "id": "W1",
                     "title": "OA",
+                    "relevance_score": 0.9,
                     "primary_location": {"is_oa": True, "pdf_url": "https://oa.test/pdf"},
                 },
-                {"id": "W2", "title": "PDF", "has_content": {"pdf": True}},
+                {
+                    "id": "W2",
+                    "title": "PDF",
+                    "has_content": {"pdf": True},
+                    "relevance_score": 0.0,
+                },
             ]
         return httpx.Response(200, json={"results": works})
 

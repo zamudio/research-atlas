@@ -61,11 +61,8 @@ class ReviewModel:
 
 
 @pytest.fixture(autouse=True)
-def forbid_native_semantic_search(monkeypatch: pytest.MonkeyPatch) -> None:
-    async def pace() -> None:
-        pytest.fail("production review must not invoke native semantic search")
-
-    monkeypatch.setattr(openalex_module, "_pace_semantic", pace)
+def unpaced(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(openalex_module, "_pace_semantic", lambda: no_sleep(0))
 
 
 async def review_with_transport(
@@ -102,9 +99,10 @@ def test_whole_flow_preserves_question_and_returns_grounded_evidence(
         if request.url.host == "api.openalex.org":
             assert request.url.path == "/works"
             events.append("search")
-            assert request.url.params["search"] == LEXICAL_QUESTION
-            assert "search.semantic" not in request.url.params
-            assert request.url.params["per_page"] == "100"
+            assert request.url.params["search.semantic"] == QUESTION
+            assert "search" not in request.url.params
+            assert request.url.params["filter"] == "has_fulltext:true"
+            assert request.url.params["per_page"] == "50"
             return httpx.Response(
                 200,
                 json={
@@ -150,7 +148,7 @@ def test_unavailable_content_is_skipped_and_next_candidate_reviewed(
 
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path == "/works":
-            assert request.url.params["per_page"] == "100"
+            assert request.url.params["per_page"] == "50"
             return httpx.Response(
                 200,
                 json={
@@ -273,14 +271,15 @@ def test_review_is_sequential_bounded_and_preserves_provider_order() -> None:
 
 
 @pytest.mark.parametrize("max_sources", [1, 20, 25, 26, 50])
-def test_candidate_compensation_and_empty_search(max_sources: int) -> None:
+def test_semantic_pool_is_independent_of_review_limit_and_empty_search(max_sources: int) -> None:
     requests: list[httpx.Request] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
         requests.append(request)
         assert request.url.host == "api.openalex.org"
-        assert request.url.params["per_page"] == "100"
-        assert request.url.params["search"] == LEXICAL_QUESTION
+        assert request.url.params["per_page"] == "50"
+        assert request.url.params["search.semantic"] == QUESTION
+        assert request.url.params["filter"] == "has_fulltext:true"
         return httpx.Response(200, json={"results": []})
 
     model = ReviewModel(())
@@ -413,7 +412,7 @@ def test_question_validation_precedes_io(question: object) -> None:
 
 @pytest.mark.parametrize(
     "max_sources",
-    [0, research_module.DEFAULT_ELIGIBLE_POOL_TARGET + 1, True, False, 1.5, "2", None],
+    [0, research_module.NATIVE_SEMANTIC_LIMIT + 1, True, False, 1.5, "2", None],
 )
 def test_review_limit_validation_precedes_io(max_sources: object) -> None:
     def handler(_: httpx.Request) -> httpx.Response:
@@ -425,13 +424,13 @@ def test_review_limit_validation_precedes_io(max_sources: object) -> None:
     assert model.questions == []
 
 
-def test_question_at_character_bound_is_preserved_after_lexical_normalization() -> None:
+def test_semantic_question_at_character_bound_is_preserved() -> None:
     question = " " + "q" * 1998 + "\n"
 
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.host == "api.openalex.org":
             assert request.url.path == "/works"
-            assert request.url.params["search"] == "q" * 1998
+            assert request.url.params["search.semantic"] == question
             return httpx.Response(
                 200,
                 json={"results": [{"has_content": {"grobid_xml": True, "pdf": True}, "id": "W1"}]},
@@ -462,7 +461,7 @@ def test_review_reaches_deep_candidates_and_stops_at_usable_paper_limit(
 
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path == "/works":
-            assert request.url.params["per_page"] == "100"
+            assert request.url.params["per_page"] == "50"
             return httpx.Response(
                 200,
                 json={
@@ -517,7 +516,7 @@ def test_one_ineligible_discovery_pool_has_no_acquisition_or_extraction(
                 json={
                     "results": [
                         {"has_content": {"grobid_xml": False, "pdf": False}, "id": f"W{i}"}
-                        for i in range(1, openalex_module.DISCOVERY_POOL_SIZE + 1)
+                        for i in range(1, openalex_module.NATIVE_SEMANTIC_LIMIT + 1)
                     ]
                 },
             )
@@ -547,7 +546,7 @@ def test_one_ineligible_discovery_pool_has_no_acquisition_or_extraction(
     assert discovery_requests == 1
 
 
-def test_production_filters_then_ranks_and_counts_only_successful_reviews(
+def test_production_preserves_semantic_order_and_counts_only_successful_reviews(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     events: list[str] = []
@@ -574,11 +573,14 @@ def test_production_filters_then_ranks_and_counts_only_successful_reviews(
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.host == "api.openalex.org":
             assert request.url.path == "/works"
-            assert request.url.params["search"] == LEXICAL_QUESTION
-            assert "search.semantic" not in request.url.params
-            assert request.url.params["per_page"] == "100"
+            assert request.url.params["search.semantic"] == QUESTION
+            assert "search" not in request.url.params
+            assert request.url.params["filter"] == "has_fulltext:true"
+            assert request.url.params["per_page"] == "50"
             assert "page" not in request.url.params and "cursor" not in request.url.params
-            works: list[dict[str, object]] = [{"id": f"W{i}"} for i in range(1, 51)]
+            works: list[dict[str, object]] = [
+                {"id": f"W{i}", "has_fulltext": True} for i in range(1, 51)
+            ]
             for position in (2, 47, 48, 49):
                 works[position].update(
                     title=f"Title {position + 1}", has_content={"grobid_xml": True}
@@ -588,9 +590,9 @@ def test_production_filters_then_ranks_and_counts_only_successful_reviews(
                 locations=[{"is_oa": True, "pdf_url": "https://oa.test/W48.pdf"}],
             )
             return httpx.Response(200, json={"results": works})
-        # Ranking must have completed before any acquisition. Only advertised
+        # Semantic discovery must not invoke embeddings. Only advertised
         # routes may be attempted, and no per-paper metadata lookup occurs.
-        assert embedder.calls == [(QUESTION, "Title 3", "Title 48", "Title 49", "Title 50")]
+        assert embedder.calls == []
         events.append(request.url.path)
         if request.url.host == "oa.test":
             assert request.url.path == "/W48.pdf"
@@ -607,20 +609,21 @@ def test_production_filters_then_ranks_and_counts_only_successful_reviews(
     assert extracted == ["W3", "W49"]
     assert model.questions == [QUESTION, QUESTION]
     assert events == [
-        "/works/W48.grobid-xml",
-        "/W48.pdf",
-        "/works/W48.pdf",
         "/works/W3.grobid-xml",
         "extract",
         "extracted",
+        "/works/W48.grobid-xml",
+        "/W48.pdf",
+        "/works/W48.pdf",
         "/works/W49.grobid-xml",
         "extract",
         "extracted",
     ]
 
 
-def test_review_fills_fifty_eligible_pool_before_ranking_and_reviews_six() -> None:
+def test_production_semantic_failure_ranks_lexical_pool_and_reviews_six() -> None:
     discovery_requests = 0
+    semantic_requests = 0
     fetched: list[str] = []
     eligible = tuple(range(51, 101))
     embedder = FakeEmbedder(
@@ -629,11 +632,18 @@ def test_review_fills_fifty_eligible_pool_before_ranking_and_reviews_six() -> No
     model = ReviewModel((proposal_bytes(),) * 6)
 
     def handler(request: httpx.Request) -> httpx.Response:
-        nonlocal discovery_requests
+        nonlocal discovery_requests, semantic_requests
         if request.url.host == "api.openalex.org":
+            if "search.semantic" in request.url.params:
+                semantic_requests += 1
+                assert request.url.params["search.semantic"] == QUESTION
+                assert request.url.params["filter"] == "has_fulltext:true"
+                assert request.url.params["per_page"] == "50"
+                return httpx.Response(401)
             assert request.url.path == "/works" and request.url.params["search"] == LEXICAL_QUESTION
             assert request.url.params["per_page"] == "100"
             assert "search.semantic" not in request.url.params
+            assert "filter" not in request.url.params
             assert embedder.calls == [] and model.questions == [] and fetched == []
             assert "page" not in request.url.params and "cursor" not in request.url.params
             discovery_requests += 1
@@ -661,6 +671,7 @@ def test_review_fills_fifty_eligible_pool_before_ranking_and_reviews_six() -> No
 
     review = asyncio.run(review_with_transport(handler, model, max_sources=6, embedder=embedder))
     reviewed = (96, 97, 98, 99, 100, 51)
+    assert semantic_requests == 1 and discovery_requests == 1
     assert review.reviewed_sources == 6
     assert tuple(result.source.key for result in review.sources) == tuple(
         f"W{position}" for position in reviewed
@@ -669,15 +680,15 @@ def test_review_fills_fifty_eligible_pool_before_ranking_and_reviews_six() -> No
     assert fetched == [f"/works/W{position}.grobid-xml" for position in (95, *reviewed)]
 
 
-@pytest.mark.parametrize("default_target,max_sources", [(3, 2), (10, 4)])
-def test_production_uses_named_eligible_pool_policy(
-    default_target: int,
+@pytest.mark.parametrize("native_limit,max_sources", [(3, 2), (10, 4)])
+def test_production_uses_named_native_semantic_limit(
+    native_limit: int,
     max_sources: int,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(research_module, "DEFAULT_ELIGIBLE_POOL_TARGET", default_target)
-    pool_target = default_target
-    embedder = FakeEmbedder(((1, 0),) * (pool_target + 1))
+    monkeypatch.setattr(research_module, "NATIVE_SEMANTIC_LIMIT", native_limit)
+    monkeypatch.setattr(openalex_module, "NATIVE_SEMANTIC_LIMIT", native_limit)
+    embedder = FakeEmbedder(())
     model = ReviewModel((proposal_bytes(),) * max_sources)
     fetched: list[str] = []
     discovery_requests = 0
@@ -685,11 +696,14 @@ def test_production_uses_named_eligible_pool_policy(
     def handler(request: httpx.Request) -> httpx.Response:
         nonlocal discovery_requests
         if request.url.host == "api.openalex.org":
-            assert request.url.path == "/works" and request.url.params["search"] == LEXICAL_QUESTION
-            assert "search.semantic" not in request.url.params
+            assert request.url.path == "/works"
+            assert request.url.params["search.semantic"] == QUESTION
+            assert "search" not in request.url.params
+            assert request.url.params["filter"] == "has_fulltext:true"
             assert embedder.calls == [] and fetched == [] and model.questions == []
             assert "page" not in request.url.params and "cursor" not in request.url.params
             per_page = int(request.url.params["per_page"])
+            assert per_page == native_limit
             discovery_requests += 1
             assert discovery_requests == 1
             return httpx.Response(
@@ -706,9 +720,15 @@ def test_production_uses_named_eligible_pool_policy(
                 },
             )
         assert request.url.host == "content.openalex.org"
-        assert embedder.calls == [(QUESTION, *(f"Paper {i}" for i in range(1, pool_target + 1)))]
+        assert embedder.calls == []
         fetched.append(request.url.path)
         return httpx.Response(200, content=XML)
+
+    with pytest.raises(
+        ValueError, match=f"^max_sources must be an integer between 1 and {native_limit}$"
+    ):
+        asyncio.run(review_with_transport(handler, model, max_sources=native_limit + 1))
+    assert discovery_requests == 0
 
     review = asyncio.run(
         review_with_transport(handler, model, max_sources=max_sources, embedder=embedder)

@@ -182,9 +182,9 @@ class OpenAlex:
         semantic: bool = False,
         embedder: Embedder | None = None,
     ) -> tuple[ContentCandidate, ...]:
-        """Use limit as the eligible lexical pool target, with optional local ranking.
+        """Use limit to bound semantic results or target eligible lexical candidates.
 
-        Native semantic search remains an independent provider-ranked path.
+        Native semantic results retain provider order; lexical hits may be locally ranked.
         """
         maximum = NATIVE_SEMANTIC_LIMIT if semantic else DISCOVERY_POOL_SIZE
         if type(query) is not str or not query.strip() or len(query) > 2000:
@@ -237,6 +237,7 @@ class OpenAlex:
             params={
                 "search.semantic" if semantic else "search": query,
                 "per_page": per_page,
+                **({"filter": "has_fulltext:true"} if semantic else {}),
                 "select": "id,title,doi,publication_year,authorships,primary_location"
                 + ",has_content,best_oa_location,locations"
                 + (",abstract_inverted_index" if abstracts else ""),
