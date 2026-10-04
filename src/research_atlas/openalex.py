@@ -49,11 +49,6 @@ class _Location(_WireModel):
     is_oa: bool | None = False
 
 
-class _HasContent(_WireModel):
-    grobid_xml: bool = False
-    pdf: bool = False
-
-
 class _Work(_WireModel):
     id: str
     title: str | None = None
@@ -63,7 +58,6 @@ class _Work(_WireModel):
     primary_location: _Location | None = None
     best_oa_location: _Location | None = None
     locations: list[_Location] | None = None
-    has_content: _HasContent | None = None
     abstract_inverted_index: dict[str, list[int]] | None = None
 
     def source(self) -> Source:
@@ -181,26 +175,24 @@ class OpenAlex:
         """Try each supported route until original content yields usable passages."""
         if self._key is None or not self._key.get_secret_value().strip():
             raise OpenAlexError("missing_api_key")
+        # Metadata availability flags can be stale; the content endpoint is authoritative.
+        acquired = await self._cached_content(source, "grobid")
+        if acquired is not None:
+            return acquired
         raw_work = await self._get(
             f"https://api.openalex.org/works/{source.openalex_id}",
-            params={"select": "id,has_content,best_oa_location,primary_location,locations"},
+            params={"select": "id,best_oa_location,primary_location,locations"},
             bound=8 * 1024 * 1024,
             allow_missing=True,
         )
         if raw_work is None:
-            return None
+            return await self._cached_content(source, "pdf")
         try:
             work = _Work.model_validate_json(raw_work)
             if work.source().key != source.key:
                 raise ValueError
         except ValidationError, ValueError:
             raise OpenAlexError("malformed_work_response") from None
-
-        available = work.has_content or _HasContent()
-        if available.grobid_xml:
-            acquired = await self._cached_content(source, "grobid")
-            if acquired is not None:
-                return acquired
 
         urls: list[str] = []
         for location in (work.best_oa_location, work.primary_location, *(work.locations or ())):
@@ -212,9 +204,7 @@ class OpenAlex:
             acquired = _prepare(await self._external_pdf(url), "pdf")
             if acquired is not None:
                 return acquired
-        if available.pdf:
-            return await self._cached_content(source, "pdf")
-        return None
+        return await self._cached_content(source, "pdf")
 
     async def _cached_content(self, source: Source, kind: ContentKind) -> AcquiredContent | None:
         extension = {"grobid": "grobid-xml", "pdf": "pdf"}[kind]
