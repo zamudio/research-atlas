@@ -116,7 +116,7 @@ def test_whole_flow_preserves_question_and_returns_grounded_evidence(
     assert review.sources[0].evidence[0].passages == (PASSAGE,)
     assert model.questions == [QUESTION]
     assert model.documents == [f"[p0001] {PASSAGE}\n\n[p0002] {OTHER}\n"]
-    assert events == ["search", "fetch W2", "extract", "extracted"]
+    assert events == ["search", "metadata W2", "fetch W2", "extract", "extracted"]
     assert projections == [XML]
     assert [field.name for field in fields(review)] == ["question", "reviewed_sources", "sources"]
     assert not hasattr(review, "__dict__")
@@ -218,12 +218,15 @@ def test_review_is_sequential_bounded_and_preserves_provider_order() -> None:
     assert model.questions == [QUESTION] * 3
     assert events == [
         "search",
+        "/works/W3",
         "/works/W3.grobid-xml",
         "extract",
         "extracted",
+        "/works/W1",
         "/works/W1.grobid-xml",
         "extract",
         "extracted",
+        "/works/W2",
         "/works/W2.grobid-xml",
         "extract",
         "extracted",
@@ -297,9 +300,7 @@ def test_general_openalex_failures_propagate(phase: str, fault: str) -> None:
     assert error.value.code == expected
     assert str(error.value) == expected
     attempts = 3 if fault in {"429", "503", "transport"} else 1
-    assert failing_calls == attempts * (
-        2 if phase == "content" and fault in {"503", "transport", "empty"} else 1
-    )
+    assert failing_calls == attempts
     assert model.questions == []
 
 
@@ -395,7 +396,10 @@ def test_review_reaches_deep_candidates_and_stops_at_usable_paper_limit(
             return httpx.Response(200, json={"results": [{"id": f"W{i}"} for i in range(1, 51)]})
         fetched.append(request.url.path)
         if request.url.host == "api.openalex.org":
-            return work_response(request, grobid=False, pdf=False)
+            available = request.url.path.rsplit("/", 1)[1] in {"W8", "W9", "W10", "W11"}
+            return work_response(
+                request, grobid=available and not pdf_backed, pdf=available and pdf_backed
+            )
         extension = "pdf" if pdf_backed else "grobid-xml"
         if request.url.path in {f"/works/W{i}.{extension}" for i in (8, 9, 10, 11)}:
             return httpx.Response(200, content=original)
@@ -408,11 +412,11 @@ def test_review_reaches_deep_candidates_and_stops_at_usable_paper_limit(
     assert len(model.questions) == 3
     assert projections == [original] * 3
     assert all("W11" not in path for path in fetched)
-    assert len(fetched) == (30 if pdf_backed else 24)
+    assert len(fetched) == 13
     assert all(result.content_sha256 == sha256(original).hexdigest() for result in review.sources)
 
 
-def test_exhausting_fifty_candidates_with_negative_metadata_still_probes_cached_formats() -> None:
+def test_exhausting_fifty_candidates_without_cached_formats_makes_no_download_requests() -> None:
     downloads = 0
     metadata = 0
 
@@ -440,5 +444,5 @@ def test_exhausting_fifty_candidates_with_negative_metadata_still_probes_cached_
     model = ReviewModel(())
     review = asyncio.run(review_with_transport(handler, model, max_sources=3))
     assert review == EvidenceReview(QUESTION, 0, ())
-    assert downloads == 100 and metadata == 50
+    assert downloads == 0 and metadata == 50
     assert model.questions == []
