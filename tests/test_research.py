@@ -25,6 +25,7 @@ from tests.test_extraction import OTHER, PASSAGE, XML, proposal_bytes
 from tests.test_openalex import KEY, no_sleep
 
 QUESTION = "  What does response time tell us about learning?\n"
+LEXICAL_QUESTION = "What does response time tell us about learning"
 
 
 class ReviewModel:
@@ -101,7 +102,7 @@ def test_whole_flow_preserves_question_and_returns_grounded_evidence(
         if request.url.host == "api.openalex.org":
             assert request.url.path == "/works"
             events.append("search")
-            assert request.url.params["search"] == QUESTION
+            assert request.url.params["search"] == LEXICAL_QUESTION
             assert "search.semantic" not in request.url.params
             assert request.url.params["per_page"] == "100"
             return httpx.Response(
@@ -279,7 +280,7 @@ def test_candidate_compensation_and_empty_search(max_sources: int) -> None:
         requests.append(request)
         assert request.url.host == "api.openalex.org"
         assert request.url.params["per_page"] == "100"
-        assert request.url.params["search"] == QUESTION
+        assert request.url.params["search"] == LEXICAL_QUESTION
         return httpx.Response(200, json={"results": []})
 
     model = ReviewModel(())
@@ -424,13 +425,13 @@ def test_review_limit_validation_precedes_io(max_sources: object) -> None:
     assert model.questions == []
 
 
-def test_question_at_character_bound_is_passed_unchanged() -> None:
+def test_question_at_character_bound_is_preserved_after_lexical_normalization() -> None:
     question = " " + "q" * 1998 + "\n"
 
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.host == "api.openalex.org":
             assert request.url.path == "/works"
-            assert request.url.params["search"] == question
+            assert request.url.params["search"] == "q" * 1998
             return httpx.Response(
                 200,
                 json={"results": [{"has_content": {"grobid_xml": True, "pdf": True}, "id": "W1"}]},
@@ -573,7 +574,7 @@ def test_production_filters_then_ranks_and_counts_only_successful_reviews(
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.host == "api.openalex.org":
             assert request.url.path == "/works"
-            assert request.url.params["search"] == QUESTION
+            assert request.url.params["search"] == LEXICAL_QUESTION
             assert "search.semantic" not in request.url.params
             assert request.url.params["per_page"] == "100"
             assert "page" not in request.url.params and "cursor" not in request.url.params
@@ -630,7 +631,7 @@ def test_review_fills_fifty_eligible_pool_before_ranking_and_reviews_six() -> No
     def handler(request: httpx.Request) -> httpx.Response:
         nonlocal discovery_requests
         if request.url.host == "api.openalex.org":
-            assert request.url.path == "/works" and request.url.params["search"] == QUESTION
+            assert request.url.path == "/works" and request.url.params["search"] == LEXICAL_QUESTION
             assert request.url.params["per_page"] == "100"
             assert "search.semantic" not in request.url.params
             assert embedder.calls == [] and model.questions == [] and fetched == []
@@ -684,7 +685,7 @@ def test_production_uses_named_eligible_pool_policy(
     def handler(request: httpx.Request) -> httpx.Response:
         nonlocal discovery_requests
         if request.url.host == "api.openalex.org":
-            assert request.url.path == "/works" and request.url.params["search"] == QUESTION
+            assert request.url.path == "/works" and request.url.params["search"] == LEXICAL_QUESTION
             assert "search.semantic" not in request.url.params
             assert embedder.calls == [] and fetched == [] and model.questions == []
             assert "page" not in request.url.params and "cursor" not in request.url.params

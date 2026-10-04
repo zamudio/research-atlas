@@ -1,6 +1,7 @@
 """Bounded, stateless OpenAlex search and scholarly content acquisition."""
 
 import asyncio
+import re
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -135,6 +136,18 @@ class _Results(_WireModel):
     results: list[_Work]
 
 
+def _lexical_query(query: str) -> str:
+    """Treat human text as lexical terms, neutralizing OpenAlex query syntax."""
+    query = query.translate(
+        str.maketrans({char: " " for char in '*?~"\u201c\u201d\u201e\u201f()!|\\'})
+    )
+    query = re.sub(r"\b(?:AND|OR|NOT)\b", lambda match: match[0].lower(), query)
+    query = " ".join(query.split())
+    if not query:
+        raise ValueError("lexical search query must be nonblank after normalization")
+    return query
+
+
 def _retry_delay(value: str | None, attempt: int) -> float:
     try:
         delay = float(value) if value is not None else 0.5 * 2**attempt
@@ -217,6 +230,8 @@ class OpenAlex:
     ) -> tuple[ContentCandidate, ...]:
         # One discovery response supplies citation, eligibility and ranking data.
         per_page = limit if semantic else DISCOVERY_POOL_SIZE
+        if not semantic:
+            query = _lexical_query(query)
         raw = await self._get(
             "https://api.openalex.org/works",
             params={

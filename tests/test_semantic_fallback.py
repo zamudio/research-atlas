@@ -144,7 +144,7 @@ def test_local_ranking_reaches_deep_lexical_candidates(fault: str) -> None:
                 return httpx.Response(200, content=b"{}")
             return httpx.Response(int(fault), headers={"Retry-After": "0"})
         lexical_calls += 1
-        assert request.url.params["search"] == question
+        assert request.url.params["search"] == "What improves learning"
         assert request.url.params["per_page"] == "100"
         assert "abstract_inverted_index" in request.url.params["select"]
         return httpx.Response(
