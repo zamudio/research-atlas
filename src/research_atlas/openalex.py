@@ -10,9 +10,11 @@ from time import monotonic
 import httpx
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, ValidationError
 
+from research_atlas.embeddings import Embedder, rank_texts
 from research_atlas.models import Source
 
 MAX_CONTENT_BYTES = 32 * 1024 * 1024
+LEXICAL_CANDIDATE_POOL = 50
 _TIMEOUT = 20.0
 _semantic_lock = Lock()
 _last_semantic_start = 0.0
@@ -50,6 +52,31 @@ class _Work(_WireModel):
     publication_year: int | None = None
     authorships: list[_Authorship] | None = None
     primary_location: _Location | None = None
+    abstract_inverted_index: dict[str, list[int]] | None = None
+
+    def source(self) -> Source:
+        return Source(
+            title=self.title or "",
+            authors=tuple(
+                (credit.raw_author_name or "").strip()
+                or ((credit.author.display_name or "").strip() if credit.author else "")
+                for credit in self.authorships or ()
+            ),
+            year=self.publication_year,
+            doi=self.doi,
+            openalex_id=self.id,
+            url=self.primary_location.landing_page_url if self.primary_location else None,
+        )
+
+    def ranking_text(self) -> str:
+        words: dict[int, str] = {}
+        for word, positions in (self.abstract_inverted_index or {}).items():
+            for position in positions:
+                if position < 0 or position in words or not word.strip():
+                    raise ValueError("invalid abstract positions")
+                words[position] = word
+        abstract = " ".join(words[position] for position in sorted(words))
+        return "\n\n".join(part for part in (self.title or "", abstract) if part)
 
 
 class _Results(_WireModel):
@@ -83,20 +110,46 @@ class OpenAlex:
         self._sleep = retry_sleep
 
     async def search(
-        self, query: str, *, limit: int = 20, semantic: bool = False
+        self,
+        query: str,
+        *,
+        limit: int = 20,
+        semantic: bool = False,
+        embedder: Embedder | None = None,
     ) -> tuple[Source, ...]:
-        """Return a bounded result set in provider order; no saved search state."""
+        """Use provider order, or local reranking after semantic provider failure."""
         maximum = 50 if semantic else 200
-        if not query.strip() or len(query) > 2000:
+        if type(query) is not str or not query.strip() or len(query) > 2000:
             raise ValueError("search query must be nonblank and at most 2000 characters")
         if type(limit) is not int or not 1 <= limit <= maximum:
             raise ValueError(f"search limit must be between 1 and {maximum}")
+        try:
+            works = await self._search_works(query, limit=limit, semantic=semantic)
+        except OpenAlexError:
+            # Only the provider/request boundary can trigger fallback; validation is above.
+            if not semantic or embedder is None:
+                raise
+            works = await self._search_works(
+                query, limit=LEXICAL_CANDIDATE_POOL, semantic=False, abstracts=True
+            )
+            try:
+                texts = tuple(work.ranking_text() for work in works)
+            except ValueError:
+                raise OpenAlexError("malformed_search_response") from None
+            order = await rank_texts(query, texts, embedder)
+            works = tuple(works[position] for position in order[:limit])
+        return tuple(work.source() for work in works)
+
+    async def _search_works(
+        self, query: str, *, limit: int, semantic: bool, abstracts: bool = False
+    ) -> tuple[_Work, ...]:
         raw = await self._get(
             "https://api.openalex.org/works",
             params={
                 "search.semantic" if semantic else "search": query,
                 "per_page": limit,
-                "select": "id,title,doi,publication_year,authorships,primary_location",
+                "select": "id,title,doi,publication_year,authorships,primary_location"
+                + (",abstract_inverted_index" if abstracts else ""),
             },
             bound=8 * 1024 * 1024,
             semantic=semantic,
@@ -105,21 +158,10 @@ class OpenAlex:
             results = _Results.model_validate_json(raw or b"")
             if len(results.results) > limit:
                 raise ValueError
-            return tuple(
-                Source(
-                    title=work.title or "",
-                    authors=tuple(
-                        (credit.raw_author_name or "").strip()
-                        or ((credit.author.display_name or "").strip() if credit.author else "")
-                        for credit in work.authorships or ()
-                    ),
-                    year=work.publication_year,
-                    doi=work.doi,
-                    openalex_id=work.id,
-                    url=work.primary_location.landing_page_url if work.primary_location else None,
-                )
-                for work in results.results
-            )
+            # Check canonical identity before any ranking; richer work data stays private.
+            for work in results.results:
+                work.source()
+            return tuple(results.results)
         except ValidationError, ValueError:
             raise OpenAlexError("malformed_search_response") from None
 

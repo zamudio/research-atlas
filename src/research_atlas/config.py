@@ -11,6 +11,9 @@ class ProviderSettings(BaseSettings):
     model_provider: str | None = None
     model_name: str | None = None
     model_base_url: str | None = None
+    embedding_provider: str | None = None
+    embedding_model_name: str = "all-minilm"
+    embedding_base_url: str | None = None
     ollama_api_key: SecretStr | None = None
     openai_api_key: SecretStr | None = None
     anthropic_api_key: SecretStr | None = None

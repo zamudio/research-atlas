@@ -3,12 +3,14 @@
 import httpx
 
 from research_atlas.config import ProviderSettings
+from research_atlas.embeddings import Embedder
 from research_atlas.providers import StructuredModel
 from research_atlas.providers.anthropic import AnthropicModel
 from research_atlas.providers.deepseek_responses import DeepSeekResponsesModel
 from research_atlas.providers.gemini import GeminiInteractionsModel
 from research_atlas.providers.kimi import KimiModel
 from research_atlas.providers.ollama import OllamaModel
+from research_atlas.providers.ollama_embeddings import OllamaEmbedder
 from research_atlas.providers.openai_compatible_chat import (
     OpenAICompatibleChatModel,
 )
@@ -39,3 +41,14 @@ def create_structured_model(
     if provider == "openai_compatible":
         return OpenAICompatibleChatModel(settings, client)
     raise ValueError("unknown built-in model provider")
+
+
+def create_embedder(
+    settings: ProviderSettings, client: httpx.AsyncClient | None = None
+) -> Embedder | None:
+    """Embeddings are opt-in and independent of the structured model provider."""
+    if settings.embedding_provider is None or not settings.embedding_provider.strip():
+        return None
+    if settings.embedding_provider == "ollama":
+        return OllamaEmbedder(settings, client)
+    raise ValueError("unknown built-in embedding provider")

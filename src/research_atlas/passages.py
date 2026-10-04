@@ -4,7 +4,11 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from types import MappingProxyType
 
+from research_atlas.embeddings import Embedder, EmbeddingError, rank_texts
+
 MAX_PASSAGE_CHARACTERS = 20_000
+PAPER_CONTEXT_CHARACTERS = 60_000
+PASSAGE_EMBEDDING_CHARACTERS = 4_000
 
 
 @dataclass(frozen=True, slots=True)
@@ -38,3 +42,40 @@ def build_passage_index(content: bytes) -> PassageIndex:
     if not passages:
         raise ValueError("prepared document has no nonblank passages")
     return PassageIndex(MappingProxyType(passages))
+
+
+async def select_context(
+    index: PassageIndex, question: str, embedder: Embedder | None
+) -> PassageIndex:
+    """Reduce large papers when embeddings work; otherwise preserve full-paper context."""
+    if embedder is None or len(index.model_text) <= PAPER_CONTEXT_CHARACTERS:
+        return index
+    passages = tuple(index.passages.items())
+    try:
+        order = await rank_texts(
+            question, tuple(text[:PASSAGE_EMBEDDING_CHARACTERS] for _, text in passages), embedder
+        )
+    except EmbeddingError:
+        return index
+    selected: set[int] = set()
+    # Each entry costs its ID, text, and two separating newlines; the last costs one less.
+    used = -1
+    for hit in order:
+        if hit not in selected:
+            key, text = passages[hit]
+            cost = len(key) + len(text) + 5
+            if used + cost > PAPER_CONTEXT_CHARACTERS:
+                continue
+            selected.add(hit)
+            used += cost
+        for position in (hit - 1, hit + 1):
+            if not 0 <= position < len(passages) or position in selected:
+                continue
+            key, text = passages[position]
+            cost = len(key) + len(text) + 5
+            if used + cost <= PAPER_CONTEXT_CHARACTERS:
+                selected.add(position)
+                used += cost
+    return PassageIndex(
+        MappingProxyType({key: text for i, (key, text) in enumerate(passages) if i in selected})
+    )
