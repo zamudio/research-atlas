@@ -72,6 +72,8 @@ def test_all_providers_use_canonical_validation_and_grounding(
     question = "What does response time tell us?"
 
     def handler(request: httpx.Request) -> httpx.Response:
+        if case.name == "ollama" and request.url.path == "/api/show":
+            return httpx.Response(200, json={"model_info": {"reference.context_length": 32768}})
         assert question in request.content.decode()
         return httpx.Response(200, json=envelope(case, json.dumps(proposal)))
 
@@ -315,7 +317,9 @@ def expected_payload(
         ],
     }
     if case.name == "ollama":
-        payload.update({"think": False, "format": schema, "options": {"temperature": 0}})
+        payload.update(
+            {"think": False, "format": schema, "options": {"temperature": 0, "num_ctx": 32768}}
+        )
     else:
         payload["response_format"] = {
             "type": "json_schema",
@@ -331,7 +335,10 @@ def expected_payload(
 
 
 @pytest.mark.parametrize("case", CASES, ids=lambda case: case.name)
-def test_exact_request_auth_and_cross_provider_result(case: ProviderCase) -> None:
+@pytest.mark.parametrize("context_override", [None, 8192])
+def test_exact_request_auth_and_cross_provider_result(
+    case: ProviderCase, context_override: int | None
+) -> None:
     schema = ExtractionProposal.model_json_schema()
     canonical = copy.deepcopy(schema)
     indexed = build_passage_index(b"Results\n\nNo change.\n").model_text
@@ -340,6 +347,11 @@ def test_exact_request_auth_and_cross_provider_result(case: ProviderCase) -> Non
     def handler(request: httpx.Request) -> httpx.Response:
         nonlocal calls
         calls += 1
+        if case.name == "ollama" and request.url.path == "/api/show":
+            assert request.method == "POST" and str(request.url) == case.base + "/api/show"
+            assert request.headers["Authorization"] == "Bearer " + KEY
+            assert json.loads(request.content) == {"model": "chosen-alias"}
+            return httpx.Response(200, json={"model_info": {"reference.context_length": 32768}})
         assert request.method == "POST" and str(request.url) == case.base + case.suffix
         assert request.headers[case.header] == (
             "Bearer " + KEY if case.header == "Authorization" else KEY
@@ -349,7 +361,10 @@ def test_exact_request_auth_and_cross_provider_result(case: ProviderCase) -> Non
         if case.name == "anthropic":
             assert request.headers["anthropic-version"] == "2023-06-01"
             assert "anthropic-beta" not in request.headers
-        assert json.loads(request.content) == expected_payload(case, schema, indexed)
+        expected = expected_payload(case, schema, indexed)
+        if case.name == "ollama" and context_override is not None:
+            expected["options"] = {"temperature": 0, "num_ctx": context_override}
+        assert json.loads(request.content) == expected
         assert request.extensions["timeout"] == {
             "connect": 600,
             "read": 600,
@@ -360,7 +375,9 @@ def test_exact_request_auth_and_cross_provider_result(case: ProviderCase) -> Non
 
     async def scenario() -> None:
         async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-            provider: StructuredModel = create_structured_model(settings(case), client)
+            provider: StructuredModel = create_structured_model(
+                settings(case, model_context_tokens=context_override), client
+            )
             assert isinstance(provider, case.adapter)
             result = await provider.generate(EXTRACTION_INSTRUCTIONS, indexed, schema)
         assert result == RAW.encode("utf-8")
@@ -368,7 +385,7 @@ def test_exact_request_auth_and_cross_provider_result(case: ProviderCase) -> Non
         assert DISCARDED not in repr(result) and KEY not in repr(result)
 
     run(scenario())
-    assert calls == 1 and schema == canonical
+    assert calls == (2 if case.name == "ollama" else 1) and schema == canonical
 
 
 @pytest.mark.parametrize("case", NEW_CASES, ids=lambda case: case.name)

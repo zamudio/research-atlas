@@ -14,6 +14,7 @@ from research_atlas.providers._config import (
     model_base_url,
     model_name,
 )
+from research_atlas.providers._http import bearer_headers, object_fields, post_json
 
 
 class OllamaModel:
@@ -29,6 +30,38 @@ class OllamaModel:
         self._base_url = model_base_url(settings, "http://localhost:11434", api_key=self._api_key)
         self._timeout = settings.model_timeout_seconds
         self._client = client
+        self._context_override = settings.model_context_tokens
+        self._advertised_context: int | None = None
+
+    async def _context_tokens(self, client: httpx.AsyncClient) -> int:
+        if self._advertised_context is None:
+            fields = await post_json(
+                client,
+                self._base_url + "/api/show",
+                {"model": self._model},
+                bearer_headers(self._api_key),
+                self._timeout,
+                "ollama",
+            )
+            try:
+                info = object_fields(fields.get("model_info"))
+                # Ollama uses architecture-specific keys such as llama.context_length.
+                contexts = [
+                    (key, value) for key, value in info.items() if key.endswith(".context_length")
+                ]
+                if len(contexts) != 1:
+                    raise ValueError
+                key, context = contexts[0]
+                if key == ".context_length" or type(context) is not int or context <= 0:
+                    raise ValueError
+            except ValueError:
+                raise ModelProviderError("ollama_invalid_context_metadata") from None
+            self._advertised_context = context
+        if self._context_override is not None:
+            if self._context_override > self._advertised_context:
+                raise ModelProviderError("ollama_context_override_exceeds_maximum")
+            return self._context_override
+        return self._advertised_context
 
     async def generate(
         self, instructions: str, input_text: str, schema: Mapping[str, object]
@@ -45,6 +78,7 @@ class OllamaModel:
         input_text: str,
         schema: Mapping[str, object],
     ) -> bytes:
+        context_tokens = await self._context_tokens(client)
         payload = {
             "model": self._model,
             "stream": False,
@@ -54,7 +88,7 @@ class OllamaModel:
                 {"role": "system", "content": instructions},
                 {"role": "user", "content": input_text},
             ],
-            "options": {"temperature": 0},
+            "options": {"temperature": 0, "num_ctx": context_tokens},
         }
         try:
             async with asyncio.timeout(self._timeout):

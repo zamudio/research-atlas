@@ -1,3 +1,4 @@
+import json
 from asyncio import run
 from pathlib import Path
 
@@ -24,6 +25,7 @@ def test_settings_load_for_discovery_without_extraction(monkeypatch: pytest.Monk
     settings = ProviderSettings()
     assert settings.model_provider is None and settings.model_name is None
     assert settings.model_base_url is None
+    assert settings.model_context_tokens is None
     assert settings.model_timeout_seconds == 600
     with pytest.raises(ValueError, match="provider must be explicitly configured"):
         create_structured_model(settings)
@@ -140,6 +142,11 @@ def test_authenticated_allowed_endpoints_send_credential(
         nonlocal calls
         calls += 1
         endpoint = base_url or "https://api.openai.com/v1"
+        assert request.headers["Authorization"] == "Bearer test-only-key"
+        if provider == "ollama" and request.url.path.endswith("/api/show"):
+            assert str(request.url) == endpoint + "/api/show"
+            assert json.loads(request.content) == {"model": "chosen"}
+            return httpx.Response(200, json={"model_info": {"reference.context_length": 32768}})
         suffix = "/responses" if provider == "openai" else "/api/chat"
         assert str(request.url) == endpoint + suffix
         assert request.headers["Authorization"] == "Bearer test-only-key"
@@ -179,7 +186,7 @@ def test_authenticated_allowed_endpoints_send_credential(
             assert result == b"{}"
 
     run(scenario())
-    assert calls == 1
+    assert calls == (2 if provider == "ollama" else 1)
 
 
 @pytest.mark.parametrize("key", [None, "", " \t"])
@@ -189,8 +196,11 @@ def test_unauthenticated_ollama_local_http_remains_allowed(key: str | None) -> N
     def handler(request: httpx.Request) -> httpx.Response:
         nonlocal calls
         calls += 1
-        assert str(request.url) == "http://localhost:11434/api/chat"
         assert "Authorization" not in request.headers
+        if request.url.path == "/api/show":
+            assert str(request.url) == "http://localhost:11434/api/show"
+            return httpx.Response(200, json={"model_info": {"reference.context_length": 32768}})
+        assert str(request.url) == "http://localhost:11434/api/chat"
         return httpx.Response(
             200, json={"model": "chosen", "done": True, "message": {"content": "{}"}}
         )
@@ -209,4 +219,4 @@ def test_unauthenticated_ollama_local_http_remains_allowed(key: str | None) -> N
             assert result == b"{}"
 
     run(scenario())
-    assert calls == 1
+    assert calls == 2
