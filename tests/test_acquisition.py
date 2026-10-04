@@ -5,12 +5,18 @@ import httpx
 import pytest
 
 import research_atlas.openalex as module
+from research_atlas.content import AcquiredContent
 from research_atlas.openalex import OpenAlex, OpenAlexError
 from tests.test_content import text_pdf
 from tests.test_extraction import SOURCE, XML
 from tests.test_openalex import KEY, no_sleep
 
 PDF = text_pdf()
+
+
+async def discover_and_fetch(atlas: OpenAlex) -> AcquiredContent | None:
+    candidates = await atlas.search("learning", limit=1)
+    return await atlas.fetch_content(candidates[0]) if candidates else None
 
 
 @pytest.mark.parametrize("route", ["grobid", "cached", "oa", "second_oa", "none"])
@@ -27,25 +33,30 @@ def test_route_preference_and_next_oa_location(route: str) -> None:
                 return httpx.Response(200, content=PDF)
             return httpx.Response(404)
         if request.url.host == "api.openalex.org":
-            assert request.url.path == f"/works/{SOURCE.key}"
+            assert request.url.path == "/works"
             assert (
                 request.url.params["select"]
-                == "id,has_content,best_oa_location,primary_location,locations"
+                == "id,title,doi,publication_year,authorships,primary_location,"
+                "has_content,best_oa_location,locations"
             )
             return httpx.Response(
                 200,
                 json={
-                    "id": SOURCE.key,
-                    "has_content": {
-                        "grobid_xml": route == "grobid",
-                        "pdf": route in {"grobid", "cached", "oa", "second_oa"},
-                    },
-                    "best_oa_location": {"is_oa": True, "pdf_url": "https://oa.test/first"},
-                    "locations": [
-                        {"is_oa": False, "pdf_url": "https://closed.test/paper.pdf"},
-                        {"is_oa": True, "pdf_url": "https://oa.test/first"},
-                        {"is_oa": True, "pdf_url": "https://oa.test/second"},
-                    ],
+                    "results": [
+                        {
+                            "id": SOURCE.key,
+                            "has_content": {
+                                "grobid_xml": route == "grobid",
+                                "pdf": route in {"grobid", "cached", "oa", "second_oa"},
+                            },
+                            "best_oa_location": {"is_oa": True, "pdf_url": "https://oa.test/first"},
+                            "locations": [
+                                {"is_oa": False, "pdf_url": "https://closed.test/paper.pdf"},
+                                {"is_oa": True, "pdf_url": "https://oa.test/first"},
+                                {"is_oa": True, "pdf_url": "https://oa.test/second"},
+                            ],
+                        }
+                    ]
                 },
             )
         assert "Authorization" not in request.headers and "Cookie" not in request.headers
@@ -60,7 +71,7 @@ def test_route_preference_and_next_oa_location(route: str) -> None:
             headers={"Authorization": "inherited-secret", "Cookie": "secret"},
             auth=("username", "password"),
         ) as client:
-            result = await OpenAlex(KEY, client).fetch_content(SOURCE)
+            result = await discover_and_fetch(OpenAlex(KEY, client))
             if route == "none":
                 assert result is None
             else:
@@ -69,8 +80,8 @@ def test_route_preference_and_next_oa_location(route: str) -> None:
                 assert result.kind == ("grobid" if route == "grobid" else "pdf")
 
     asyncio.run(scenario())
-    metadata = f"https://api.openalex.org/works/{SOURCE.key}?select=id%2Chas_content%2Cbest_oa_location%2Cprimary_location%2Clocations"
-    expected = [metadata]
+    assert calls[0].startswith("https://api.openalex.org/works?")
+    expected = [calls[0]]
     if route == "grobid":
         expected.append(f"https://content.openalex.org/works/{SOURCE.key}.grobid-xml")
     else:
@@ -108,13 +119,17 @@ def test_unusable_grobid_tries_oa_before_cached_pdf_without_best_pdf(
             return httpx.Response(
                 200,
                 json={
-                    "id": SOURCE.key,
-                    "has_content": {"grobid_xml": True, "pdf": cached_pdf_advertised},
-                    "best_oa_location": {
-                        "is_oa": True,
-                        "landing_page_url": "https://oa.test/landing",
-                    },
-                    "locations": [{"is_oa": True, "pdf_url": "https://oa.test/direct"}],
+                    "results": [
+                        {
+                            "id": SOURCE.key,
+                            "has_content": {"grobid_xml": True, "pdf": cached_pdf_advertised},
+                            "best_oa_location": {
+                                "is_oa": True,
+                                "landing_page_url": "https://oa.test/landing",
+                            },
+                            "locations": [{"is_oa": True, "pdf_url": "https://oa.test/direct"}],
+                        }
+                    ]
                 },
             )
         assert request.url.path == "/direct"
@@ -122,12 +137,12 @@ def test_unusable_grobid_tries_oa_before_cached_pdf_without_best_pdf(
 
     async def scenario() -> None:
         async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-            result = await OpenAlex(KEY, client).fetch_content(SOURCE)
+            result = await discover_and_fetch(OpenAlex(KEY, client))
             assert result is not None and result.original == PDF
 
     asyncio.run(scenario())
     assert calls == [
-        f"/works/{SOURCE.key}",
+        "/works",
         f"/works/{SOURCE.key}.grobid-xml",
         "/direct",
     ]
@@ -147,10 +162,14 @@ def test_failed_or_unusable_oa_pdfs_fall_back_to_advertised_cached_pdf(
             return httpx.Response(
                 200,
                 json={
-                    "id": SOURCE.key,
-                    "has_content": {"grobid_xml": False, "pdf": True},
-                    "best_oa_location": {"is_oa": True, "pdf_url": "https://oa.test/first"},
-                    "locations": [{"is_oa": True, "pdf_url": "https://oa.test/second"}],
+                    "results": [
+                        {
+                            "id": SOURCE.key,
+                            "has_content": {"grobid_xml": False, "pdf": True},
+                            "best_oa_location": {"is_oa": True, "pdf_url": "https://oa.test/first"},
+                            "locations": [{"is_oa": True, "pdf_url": "https://oa.test/second"}],
+                        }
+                    ]
                 },
             )
         if request.url.host == "oa.test":
@@ -162,14 +181,14 @@ def test_failed_or_unusable_oa_pdfs_fall_back_to_advertised_cached_pdf(
 
     async def scenario() -> None:
         async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-            acquired = await OpenAlex(KEY, client).fetch_content(SOURCE)
+            acquired = await discover_and_fetch(OpenAlex(KEY, client))
             if cached_pdf == PDF:
                 assert acquired is not None and acquired.kind == "pdf" and acquired.original == PDF
             else:
                 assert acquired is None
 
     asyncio.run(scenario())
-    assert paths == [f"/works/{SOURCE.key}", "/first", "/second", f"/works/{SOURCE.key}.pdf"]
+    assert paths == ["/works", "/first", "/second", f"/works/{SOURCE.key}.pdf"]
 
 
 @pytest.mark.parametrize(
@@ -199,12 +218,16 @@ def test_external_failure_tries_next_pdf(fault: str, monkeypatch: pytest.MonkeyP
             return httpx.Response(
                 200,
                 json={
-                    "id": SOURCE.key,
-                    "has_content": {"grobid_xml": False, "pdf": False},
-                    "locations": [
-                        {"is_oa": True, "pdf_url": "https://oa.test/first"},
-                        {"is_oa": True, "pdf_url": "https://oa.test/second"},
-                    ],
+                    "results": [
+                        {
+                            "id": SOURCE.key,
+                            "has_content": {"grobid_xml": False, "pdf": False},
+                            "locations": [
+                                {"is_oa": True, "pdf_url": "https://oa.test/first"},
+                                {"is_oa": True, "pdf_url": "https://oa.test/second"},
+                            ],
+                        }
+                    ]
                 },
             )
         assert request.url.host == "oa.test"
@@ -231,7 +254,7 @@ def test_external_failure_tries_next_pdf(fault: str, monkeypatch: pytest.MonkeyP
 
     async def scenario() -> None:
         async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-            result = await OpenAlex(KEY, client).fetch_content(SOURCE)
+            result = await discover_and_fetch(OpenAlex(KEY, client))
             assert result is not None and result.original == PDF
 
     asyncio.run(scenario())
@@ -258,15 +281,19 @@ def test_external_redirect_can_resolve_pdf_without_credentials() -> None:
 
 
 @pytest.mark.parametrize("code", [401, 403, 429])
-@pytest.mark.parametrize("phase", ["metadata", "cached_grobid", "cached_pdf"])
+@pytest.mark.parametrize("phase", ["search", "cached_grobid", "cached_pdf"])
 def test_auth_and_budget_failures_surface(code: int, phase: str) -> None:
     def handler(request: httpx.Request) -> httpx.Response:
-        if phase != "metadata" and request.url.host == "api.openalex.org":
+        if phase != "search" and request.url.host == "api.openalex.org":
             return httpx.Response(
                 200,
                 json={
-                    "id": SOURCE.key,
-                    "has_content": {"grobid_xml": phase == "cached_grobid", "pdf": True},
+                    "results": [
+                        {
+                            "id": SOURCE.key,
+                            "has_content": {"grobid_xml": phase == "cached_grobid", "pdf": True},
+                        }
+                    ]
                 },
             )
         return httpx.Response(code, text="secret")
@@ -274,24 +301,28 @@ def test_auth_and_budget_failures_surface(code: int, phase: str) -> None:
     async def scenario() -> None:
         async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
             with pytest.raises(OpenAlexError, match=f"^http_{code}$"):
-                await OpenAlex(KEY, client, retry_sleep=no_sleep).fetch_content(SOURCE)
+                await discover_and_fetch(OpenAlex(KEY, client, retry_sleep=no_sleep))
 
     asyncio.run(scenario())
 
 
 @pytest.mark.parametrize(
     "metadata",
-    [b"not json secret", b'{"id":"W456"}', b'{"id":"W123","has_content":{"pdf":"true"}}'],
+    [
+        b"not json secret",
+        b'{"results":[{"id":"wrong"}]}',
+        b'{"results":[{"id":"W123","has_content":{"pdf":"true"}}]}',
+    ],
 )
-def test_malformed_or_wrong_work_metadata_surfaces_safely(metadata: bytes) -> None:
+def test_malformed_discovery_metadata_surfaces_safely(metadata: bytes) -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.url.host == "api.openalex.org"
         return httpx.Response(200, content=metadata)
 
     async def scenario() -> None:
         async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-            with pytest.raises(OpenAlexError, match=r"^malformed_work_response$"):
-                await OpenAlex(KEY, client).fetch_content(SOURCE)
+            with pytest.raises(OpenAlexError, match=r"^malformed_search_response$"):
+                await discover_and_fetch(OpenAlex(KEY, client))
 
     asyncio.run(scenario())
 
@@ -303,7 +334,12 @@ def test_unusable_advertised_grobid_tries_advertised_pdf_next() -> None:
         paths.append(request.url.path)
         if request.url.host == "api.openalex.org":
             return httpx.Response(
-                200, json={"id": SOURCE.key, "has_content": {"grobid_xml": True, "pdf": True}}
+                200,
+                json={
+                    "results": [
+                        {"id": SOURCE.key, "has_content": {"grobid_xml": True, "pdf": True}}
+                    ]
+                },
             )
         if request.url.path.endswith("grobid-xml"):
             return httpx.Response(200, content=b"<TEI")
@@ -311,40 +347,45 @@ def test_unusable_advertised_grobid_tries_advertised_pdf_next() -> None:
 
     async def scenario() -> None:
         async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-            acquired = await OpenAlex(KEY, client).fetch_content(SOURCE)
+            acquired = await discover_and_fetch(OpenAlex(KEY, client))
             assert acquired is not None and acquired.kind == "pdf" and acquired.original == PDF
 
     asyncio.run(scenario())
     assert paths == [
-        f"/works/{SOURCE.key}",
+        "/works",
         f"/works/{SOURCE.key}.grobid-xml",
         f"/works/{SOURCE.key}.pdf",
     ]
 
 
-def test_missing_work_is_unavailable_without_content_requests() -> None:
+def test_empty_discovery_is_unavailable_without_content_requests() -> None:
     paths: list[str] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.url.host == "api.openalex.org"
         paths.append(request.url.path)
-        return httpx.Response(404)
+        return httpx.Response(200, json={"results": []})
 
     async def scenario() -> None:
         async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-            assert await OpenAlex(KEY, client).fetch_content(SOURCE) is None
+            assert await discover_and_fetch(OpenAlex(KEY, client)) is None
 
     asyncio.run(scenario())
-    assert paths == [f"/works/{SOURCE.key}"]
+    assert paths == ["/works"]
 
 
 def test_unexpected_acquisition_failure_surfaces() -> None:
-    def handler(_: httpx.Request) -> httpx.Response:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.host == "api.openalex.org":
+            assert request.url.path == "/works"
+            return httpx.Response(
+                200, json={"results": [{"id": SOURCE.key, "has_content": {"grobid_xml": True}}]}
+            )
         raise RuntimeError("internal failure")
 
     async def scenario() -> None:
         async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
             with pytest.raises(RuntimeError, match="internal failure"):
-                await OpenAlex(KEY, client).fetch_content(SOURCE)
+                await discover_and_fetch(OpenAlex(KEY, client))
 
     asyncio.run(scenario())

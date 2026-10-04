@@ -28,22 +28,103 @@ def test_successful_native_semantics_never_uses_embeddings_or_fallback(empty: bo
         calls += 1
         assert "search.semantic" in request.url.params
         assert "abstract_inverted_index" not in request.url.params["select"]
-        return httpx.Response(200, json={"results": [] if empty else [{"id": "W2"}, {"id": "W1"}]})
+        return httpx.Response(
+            200,
+            json={
+                "results": []
+                if empty
+                else [
+                    {"has_content": {"grobid_xml": True, "pdf": True}, "id": "W2"},
+                    {"has_content": {"grobid_xml": True, "pdf": True}, "id": "W1"},
+                ]
+            },
+        )
 
     async def scenario() -> None:
         async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
             sources = await OpenAlex(client=client).search(
                 "question", semantic=True, embedder=embedder
             )
-            assert tuple(source.key for source in sources) == (() if empty else ("W2", "W1"))
+            assert tuple(source.source.key for source in sources) == (() if empty else ("W2", "W1"))
 
     asyncio.run(scenario())
     assert calls == 1
     assert embedder.calls == []
 
 
-@pytest.mark.parametrize("fault", ["503", "429", "401", "transport", "empty", "malformed"])
-def test_semantic_failure_reranks_fifty_lexical_candidates_after_retries(fault: str) -> None:
+@pytest.mark.parametrize("strategy", ["native", "fallback", "lexical"])
+@pytest.mark.parametrize("eligible", [False, True])
+def test_supported_routes_filter_before_ranking_and_preserve_native_order(
+    strategy: str,
+    eligible: bool,
+) -> None:
+    embedder = FakeEmbedder(((1, 0), (0, 1), (1, 0), (0, 1)))
+    calls = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        assert request.url.host == "api.openalex.org" and request.url.path == "/works"
+        assert "filter" not in request.url.params
+        fields = set(request.url.params["select"].split(","))
+        assert {"id", "has_content", "best_oa_location", "primary_location", "locations"} <= fields
+        if strategy == "fallback" and "search.semantic" in request.url.params:
+            return httpx.Response(401)
+        # This invalid abstract must never be constructed into ranking input.
+        works: list[dict[str, object]] = [
+            {"id": "W9", "title": "Unreadable", "abstract_inverted_index": {"bad": [-1]}},
+            {"id": "W8", "has_content": {"grobid_xml": False, "pdf": False}},
+            {
+                "id": "W7",
+                "best_oa_location": {"is_oa": True, "landing_page_url": "https://oa.test/landing"},
+            },
+            {"id": "W6", "locations": [{"is_oa": False, "pdf_url": "https://closed.test/pdf"}]},
+        ]
+        if eligible:
+            works[1:1] = [
+                {"id": "W3", "title": "GROBID", "has_content": {"grobid_xml": True}},
+                {
+                    "id": "W1",
+                    "title": "OA",
+                    "primary_location": {"is_oa": True, "pdf_url": "https://oa.test/pdf"},
+                },
+                {"id": "W2", "title": "PDF", "has_content": {"pdf": True}},
+            ]
+        return httpx.Response(200, json={"results": works})
+
+    async def scenario() -> None:
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            candidates = await OpenAlex(client=client).search(
+                "q",
+                semantic=strategy != "lexical",
+                embedder=embedder,
+            )
+            expected = ("W3", "W1", "W2") if strategy == "native" else ("W1", "W3", "W2")
+            assert tuple(candidate.source.key for candidate in candidates) == (
+                expected if eligible else ()
+            )
+            if eligible:
+                routes = {candidate.source.key: candidate for candidate in candidates}
+                assert (
+                    routes["W3"].grobid_xml and not routes["W3"].pdf_urls and not routes["W3"].pdf
+                )
+                assert routes["W1"].pdf_urls == ("https://oa.test/pdf",)
+                assert not routes["W1"].grobid_xml and not routes["W1"].pdf
+                assert (
+                    routes["W2"].pdf and not routes["W2"].grobid_xml and not routes["W2"].pdf_urls
+                )
+
+    asyncio.run(scenario())
+    assert calls == (2 if strategy == "fallback" else 1)
+    assert embedder.calls == (
+        [("q", "GROBID", "OA", "PDF")] if strategy != "native" and eligible else []
+    )
+
+
+@pytest.mark.parametrize(
+    "fault", ["lexical", "503", "429", "401", "transport", "empty", "malformed"]
+)
+def test_local_ranking_reaches_deep_lexical_candidates(fault: str) -> None:
     semantic_calls = 0
     lexical_calls = 0
     question = "  What improves learning?\n"
@@ -64,13 +145,14 @@ def test_semantic_failure_reranks_fifty_lexical_candidates_after_retries(fault: 
             return httpx.Response(int(fault), headers={"Retry-After": "0"})
         lexical_calls += 1
         assert request.url.params["search"] == question
-        assert request.url.params["per_page"] == "50"
+        assert request.url.params["per_page"] == "100"
         assert "abstract_inverted_index" in request.url.params["select"]
         return httpx.Response(
             200,
             json={
                 "results": [
                     {
+                        "has_content": {"grobid_xml": True, "pdf": True},
                         "id": f"https://openalex.org/W{i + 1}",
                         "title": f"Title {i}",
                         "doi": f"https://doi.org/10.1234/WORK{i}",
@@ -86,12 +168,18 @@ def test_semantic_failure_reranks_fifty_lexical_candidates_after_retries(fault: 
     async def scenario() -> None:
         async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
             sources = await OpenAlex(client=client, retry_sleep=no_sleep).search(
-                question, limit=3, semantic=True, embedder=embedder
+                question,
+                limit=50 if fault == "lexical" else 3,
+                semantic=fault != "lexical",
+                embedder=embedder,
             )
-            assert tuple(source.key for source in sources) == ("W48", "W1", "W2")
-            assert all(isinstance(source, Source) for source in sources)
-            assert sources[0].doi == "10.1234/work47"
-            assert set(asdict(sources[0])) == {
+            expected_order = ("W48", *(f"W{i}" for i in range(1, 51) if i != 48))
+            assert tuple(source.source.key for source in sources) == (
+                expected_order if fault == "lexical" else expected_order[:3]
+            )
+            assert all(isinstance(source.source, Source) for source in sources)
+            assert sources[0].source.doi == "10.1234/work47"
+            assert set(asdict(sources[0].source)) == {
                 "title",
                 "authors",
                 "year",
@@ -101,7 +189,9 @@ def test_semantic_failure_reranks_fifty_lexical_candidates_after_retries(fault: 
             }
 
     asyncio.run(scenario())
-    assert semantic_calls == (3 if fault in ("503", "429", "transport") else 1)
+    assert semantic_calls == (
+        0 if fault == "lexical" else 3 if fault in ("503", "429", "transport") else 1
+    )
     assert lexical_calls == 1
     expected = tuple(
         "Title 47\n\nImproved later learning" if i == 47 else f"Title {i}" for i in range(50)
@@ -170,6 +260,7 @@ def test_fallback_failures_propagate_and_empty_lexical_pool_is_valid(fault: str)
             json={
                 "results": [
                     {
+                        "has_content": {"grobid_xml": True, "pdf": True},
                         "id": "W1",
                         "title": "Title",
                         "abstract_inverted_index": {"bad": [-1]} if fault == "abstract" else None,

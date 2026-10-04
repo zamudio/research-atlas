@@ -2,6 +2,7 @@
 
 import asyncio
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
 from ipaddress import ip_address
@@ -9,17 +10,20 @@ from threading import Lock
 from time import monotonic
 
 import httpx
-from pydantic import BaseModel, ConfigDict, Field, SecretStr, ValidationError
+from pydantic import BaseModel, ConfigDict, SecretStr, TypeAdapter, ValidationError
 
 from research_atlas.content import AcquiredContent, ContentKind, UnusableContent, prepare_content
-from research_atlas.embeddings import Embedder, rank_texts
+from research_atlas.embeddings import Embedder, EmbeddingError, rank_texts
 from research_atlas.models import Source
 
 MAX_CONTENT_BYTES = 32 * 1024 * 1024
-LEXICAL_CANDIDATE_POOL = 50
+DEFAULT_ELIGIBLE_POOL_TARGET = 50
+DISCOVERY_POOL_SIZE = 100
+NATIVE_SEMANTIC_LIMIT = 50
 _TIMEOUT = 20.0
 _semantic_lock = Lock()
 _last_semantic_start = 0.0
+_ABSTRACT_INDEX = TypeAdapter(dict[str, list[int]])
 
 
 class OpenAlexError(Exception):
@@ -54,6 +58,17 @@ class _HasContent(_WireModel):
     pdf: bool = False
 
 
+@dataclass(frozen=True, slots=True)
+class ContentCandidate:
+    """Internal discovery result with supported acquisition routes and ranking input."""
+
+    source: Source
+    grobid_xml: bool
+    pdf_urls: tuple[str, ...]
+    pdf: bool
+    ranking_text: str = ""
+
+
 class _Work(_WireModel):
     id: str
     title: str | None = None
@@ -64,7 +79,8 @@ class _Work(_WireModel):
     best_oa_location: _Location | None = None
     locations: list[_Location] | None = None
     has_content: _HasContent | None = None
-    abstract_inverted_index: dict[str, list[int]] | None = None
+    # Ranking-only data stays unvalidated until an eligible work needs ranking text.
+    abstract_inverted_index: object = None
 
     def source(self) -> Source:
         return Source(
@@ -81,8 +97,13 @@ class _Work(_WireModel):
         )
 
     def ranking_text(self) -> str:
+        abstract_index = (
+            _ABSTRACT_INDEX.validate_python(self.abstract_inverted_index, strict=True)
+            if self.abstract_inverted_index is not None
+            else {}
+        )
         words: dict[int, str] = {}
-        for word, positions in (self.abstract_inverted_index or {}).items():
+        for word, positions in abstract_index.items():
             for position in positions:
                 if position < 0 or position in words or not word.strip():
                     raise ValueError("invalid abstract positions")
@@ -90,9 +111,28 @@ class _Work(_WireModel):
         abstract = " ".join(words[position] for position in sorted(words))
         return "\n\n".join(part for part in (self.title or "", abstract) if part)
 
+    def candidate(self, *, abstracts: bool) -> ContentCandidate | None:
+        source = self.source()  # Validate canonical identity even for ineligible works.
+        available = self.has_content or _HasContent()
+        urls: list[str] = []
+        for location in (self.best_oa_location, self.primary_location, *(self.locations or ())):
+            if location is None or not location.is_oa or not location.pdf_url:
+                continue
+            if location.pdf_url not in urls and _public_url(location.pdf_url):
+                urls.append(location.pdf_url)
+        if not (available.grobid_xml or urls or available.pdf):
+            return None
+        return ContentCandidate(
+            source,
+            available.grobid_xml,
+            tuple(urls),
+            available.pdf,
+            self.ranking_text() if abstracts else "",
+        )
+
 
 class _Results(_WireModel):
-    results: list[_Work] = Field(max_length=200)
+    results: list[_Work]
 
 
 def _retry_delay(value: str | None, attempt: int) -> float:
@@ -128,92 +168,97 @@ class OpenAlex:
         limit: int = 20,
         semantic: bool = False,
         embedder: Embedder | None = None,
-    ) -> tuple[Source, ...]:
-        """Use provider order, or local reranking after semantic provider failure."""
-        maximum = 50 if semantic else 200
+    ) -> tuple[ContentCandidate, ...]:
+        """Use limit as the eligible lexical pool target, with optional local ranking.
+
+        Native semantic search remains an independent provider-ranked path.
+        """
+        maximum = NATIVE_SEMANTIC_LIMIT if semantic else DISCOVERY_POOL_SIZE
         if type(query) is not str or not query.strip() or len(query) > 2000:
             raise ValueError("search query must be nonblank and at most 2000 characters")
         if type(limit) is not int or not 1 <= limit <= maximum:
             raise ValueError(f"search limit must be between 1 and {maximum}")
+        if not semantic:
+            candidates = await self._search_candidates(
+                query,
+                limit=limit,
+                semantic=False,
+                abstracts=embedder is not None,
+            )
+            if embedder is not None:
+                try:
+                    order = await rank_texts(
+                        query, tuple(candidate.ranking_text for candidate in candidates), embedder
+                    )
+                except EmbeddingError:
+                    pass  # Recoverable embedding failures retain eligible lexical order.
+                else:
+                    candidates = tuple(candidates[position] for position in order)
+            return candidates
         try:
-            works = await self._search_works(query, limit=limit, semantic=semantic)
+            candidates = await self._search_candidates(query, limit=limit, semantic=semantic)
         except OpenAlexError:
             # Only the provider/request boundary can trigger fallback; validation is above.
             if not semantic or embedder is None:
                 raise
-            works = await self._search_works(
-                query, limit=LEXICAL_CANDIDATE_POOL, semantic=False, abstracts=True
+            candidates = await self._search_candidates(
+                query,
+                limit=max(DEFAULT_ELIGIBLE_POOL_TARGET, limit),
+                semantic=False,
+                abstracts=True,
             )
-            try:
-                texts = tuple(work.ranking_text() for work in works)
-            except ValueError:
-                raise OpenAlexError("malformed_search_response") from None
+            texts = tuple(candidate.ranking_text for candidate in candidates)
             order = await rank_texts(query, texts, embedder)
-            works = tuple(works[position] for position in order[:limit])
-        return tuple(work.source() for work in works)
+            candidates = tuple(candidates[position] for position in order[:limit])
+        return candidates
 
-    async def _search_works(
+    async def _search_candidates(
         self, query: str, *, limit: int, semantic: bool, abstracts: bool = False
-    ) -> tuple[_Work, ...]:
+    ) -> tuple[ContentCandidate, ...]:
+        # One discovery response supplies citation, eligibility and ranking data.
+        per_page = limit if semantic else DISCOVERY_POOL_SIZE
         raw = await self._get(
             "https://api.openalex.org/works",
             params={
                 "search.semantic" if semantic else "search": query,
-                "per_page": limit,
+                "per_page": per_page,
                 "select": "id,title,doi,publication_year,authorships,primary_location"
+                + ",has_content,best_oa_location,locations"
                 + (",abstract_inverted_index" if abstracts else ""),
             },
             bound=8 * 1024 * 1024,
             semantic=semantic,
         )
+        candidates: list[ContentCandidate] = []
         try:
             results = _Results.model_validate_json(raw or b"")
-            if len(results.results) > limit:
+            if len(results.results) > per_page:
                 raise ValueError
-            # Check canonical identity before any ranking; richer work data stays private.
             for work in results.results:
-                work.source()
-            return tuple(results.results)
+                candidate = work.candidate(abstracts=abstracts)
+                if candidate is not None:
+                    candidates.append(candidate)
+                    if len(candidates) == limit:
+                        break
         except ValidationError, ValueError:
             raise OpenAlexError("malformed_search_response") from None
+        return tuple(candidates)
 
-    async def fetch_content(self, source: Source) -> AcquiredContent | None:
-        """Try each supported route until original content yields usable passages."""
+    async def fetch_content(self, candidate: ContentCandidate) -> AcquiredContent | None:
+        """Try only discovery-advertised routes, without another Work lookup."""
         if self._key is None or not self._key.get_secret_value().strip():
             raise OpenAlexError("missing_api_key")
-        raw_work = await self._get(
-            f"https://api.openalex.org/works/{source.openalex_id}",
-            params={"select": "id,has_content,best_oa_location,primary_location,locations"},
-            bound=8 * 1024 * 1024,
-            allow_missing=True,
-        )
-        if raw_work is None:
-            return None
-        try:
-            work = _Work.model_validate_json(raw_work)
-            if work.source().key != source.key:
-                raise ValueError
-        except ValidationError, ValueError:
-            raise OpenAlexError("malformed_work_response") from None
-
-        available = work.has_content or _HasContent()
-        if available.grobid_xml:
-            acquired = await self._cached_content(source, "grobid")
+        if candidate.grobid_xml:
+            acquired = await self._cached_content(candidate.source, "grobid")
             if acquired is not None:
                 return acquired
 
-        urls: list[str] = []
-        for location in (work.best_oa_location, work.primary_location, *(work.locations or ())):
-            if location is None or not location.is_oa or not location.pdf_url:
-                continue
-            if location.pdf_url not in urls and _public_url(location.pdf_url):
-                urls.append(location.pdf_url)
-        for url in urls:
+        for url in candidate.pdf_urls:
             acquired = _prepare(await self._external_pdf(url), "pdf")
             if acquired is not None:
                 return acquired
-        if available.pdf:
-            return await self._cached_content(source, "pdf")
+        if candidate.pdf:
+            return await self._cached_content(candidate.source, "pdf")
         return None
 
     async def _cached_content(self, source: Source, kind: ContentKind) -> AcquiredContent | None:

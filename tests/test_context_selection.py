@@ -7,7 +7,6 @@ import httpx
 import pytest
 
 import research_atlas.content as content_module
-import research_atlas.openalex as openalex_module
 import research_atlas.passages as passages_module
 from research_atlas import collect_evidence, extract_evidence
 from research_atlas.embeddings import EmbeddingError
@@ -22,7 +21,7 @@ from research_atlas.passages import (
 )
 from tests.test_embeddings import FakeEmbedder
 from tests.test_extraction import SOURCE, XML, FakeModel, proposal_bytes
-from tests.test_openalex import KEY, no_sleep, work_response
+from tests.test_openalex import KEY
 
 
 def paper(blocks: tuple[str, ...]) -> bytes:
@@ -249,10 +248,7 @@ def test_large_paper_unrelated_embedding_errors_propagate(error: Exception) -> N
     assert model.calls == 0
 
 
-@pytest.mark.parametrize("fallback", [False, True])
-def test_review_shares_embedder_across_discovery_and_large_paper_extraction(
-    fallback: bool, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_review_shares_embedder_across_discovery_and_large_paper_extraction() -> None:
     content, passage_embedder = large_paper()
     calls: list[tuple[str, ...]] = []
     visible: list[str] = []
@@ -269,15 +265,23 @@ def test_review_shares_embedder_across_discovery_and_large_paper_extraction(
             visible.append(input_text)
             return proposal_bytes(("p0015",))
 
-    monkeypatch.setattr(openalex_module, "_pace_semantic", lambda: no_sleep(0))
-
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.host == "api.openalex.org":
-            if request.url.path != "/works":
-                return work_response(request)
-            if fallback and "search.semantic" in request.url.params:
-                return httpx.Response(401)
-            return httpx.Response(200, json={"results": [{"id": "W1", "title": "Learning"}]})
+            assert request.url.path == "/works"
+            assert request.url.params["search"] == "question"
+            assert "search.semantic" not in request.url.params
+            return httpx.Response(
+                200,
+                json={
+                    "results": [
+                        {
+                            "has_content": {"grobid_xml": True, "pdf": True},
+                            "id": "W1",
+                            "title": "Learning",
+                        }
+                    ]
+                },
+            )
         return httpx.Response(200, content=content)
 
     async def scenario() -> None:
@@ -295,7 +299,8 @@ def test_review_shares_embedder_across_discovery_and_large_paper_extraction(
             assert result.sources[0].evidence[0].passages[0].startswith("Strong learning result.")
 
     asyncio.run(scenario())
-    assert len(calls) == (2 if fallback else 1)
+    assert len(calls) == 2
+    assert calls[0] == ("question", "Learning")
     assert all(texts[0] == "question" for texts in calls)
     assert len(visible) == 1 and len(visible[0]) <= PAPER_CONTEXT_CHARACTERS
 
