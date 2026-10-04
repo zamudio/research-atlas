@@ -8,15 +8,16 @@ import httpx
 import pytest
 from pydantic import ValidationError
 
-import research_atlas.extraction as extraction_module
+import research_atlas.content as content_module
 import research_atlas.openalex as openalex_module
 from research_atlas import EvidenceReview, collect_evidence
 from research_atlas.extraction import EXTRACTION_INSTRUCTIONS, ExtractionProposal
 from research_atlas.grobid import project_grobid
 from research_atlas.openalex import OpenAlex, OpenAlexError
 from research_atlas.providers import ModelProviderError
+from tests.test_content import text_pdf
 from tests.test_extraction import OTHER, PASSAGE, XML, proposal_bytes
-from tests.test_openalex import KEY, no_sleep
+from tests.test_openalex import KEY, no_sleep, work_response
 
 QUESTION = "  What does response time tell us about learning?\n"
 
@@ -87,16 +88,17 @@ def test_whole_flow_preserves_question_and_returns_grounded_evidence(
         projections.append(content)
         return project_grobid(content)
 
-    monkeypatch.setattr(extraction_module, "project_grobid", project)
-    # Also catch a regression that restores the old acquisition-side import/call.
-    monkeypatch.setattr(openalex_module, "project_grobid", project, raising=False)
+    monkeypatch.setattr(content_module, "project_grobid", project)
 
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.host == "api.openalex.org":
+            if request.url.path != "/works":
+                events.append("metadata W2")
+                return work_response(request)
             events.append("search")
             assert request.url.params["search.semantic"] == QUESTION
             assert "search" not in request.url.params
-            assert request.url.params["per_page"] == "40"
+            assert request.url.params["per_page"] == "50"
             return httpx.Response(200, json={"results": [{"id": "W2", "title": "Learning"}]})
         assert request.url.path == "/works/W2.grobid-xml"
         events.append("fetch W2")
@@ -114,7 +116,7 @@ def test_whole_flow_preserves_question_and_returns_grounded_evidence(
     assert review.sources[0].evidence[0].passages == (PASSAGE,)
     assert model.questions == [QUESTION]
     assert model.documents == [f"[p0001] {PASSAGE}\n\n[p0002] {OTHER}\n"]
-    assert events == ["search", "fetch W2", "extract", "extracted"]
+    assert events == ["search", "metadata W2", "fetch W2", "extract", "extracted"]
     assert projections == [XML]
     assert [field.name for field in fields(review)] == ["question", "reviewed_sources", "sources"]
     assert not hasattr(review, "__dict__")
@@ -130,14 +132,18 @@ def test_unavailable_content_is_skipped_and_next_candidate_reviewed(
     fetched: list[str] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
-        if request.url.host == "api.openalex.org":
-            assert request.url.params["per_page"] == "2"
+        if request.url.path == "/works":
+            assert request.url.params["per_page"] == "50"
             return httpx.Response(200, json={"results": [{"id": "W1"}, {"id": "W2"}]})
+        if request.url.host == "api.openalex.org":
+            return work_response(request)
         fetched.append(request.url.path)
         if request.url.path == "/works/W1.grobid-xml":
             if fault == "missing":
                 return httpx.Response(404)
             return httpx.Response(200, content=b"x" * (len(XML) + 1))
+        if request.url.path.endswith(".pdf"):
+            return httpx.Response(404)
         return httpx.Response(200, content=XML)
 
     model = ReviewModel()
@@ -145,24 +151,31 @@ def test_unavailable_content_is_skipped_and_next_candidate_reviewed(
     assert review.reviewed_sources == 1
     assert tuple(result.source.key for result in review.sources) == ("W2",)
     assert model.questions == [QUESTION]
-    assert fetched == ["/works/W1.grobid-xml", "/works/W2.grobid-xml"]
+    assert fetched == ["/works/W1.grobid-xml", "/works/W1.pdf", "/works/W2.grobid-xml"]
 
 
 @pytest.mark.parametrize("content", [b"<TEI", b'<TEI xmlns="http://www.tei-c.org/ns/1.0"/>'])
-def test_unusable_grobid_propagates_during_extraction(content: bytes) -> None:
+def test_unusable_grobid_is_skipped(content: bytes) -> None:
     fetched: list[str] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
-        if request.url.host == "api.openalex.org":
+        if request.url.path == "/works":
             return httpx.Response(200, json={"results": [{"id": "W1"}, {"id": "W2"}]})
+        if request.url.host == "api.openalex.org":
+            return work_response(request)
         fetched.append(request.url.path)
         return httpx.Response(200, content=content)
 
     model = ReviewModel(())
-    with pytest.raises(ValueError):
-        asyncio.run(review_with_transport(handler, model))
+    review = asyncio.run(review_with_transport(handler, model))
+    assert review.reviewed_sources == 0
     assert model.questions == []
-    assert fetched == ["/works/W1.grobid-xml"]
+    assert fetched == [
+        "/works/W1.grobid-xml",
+        "/works/W1.pdf",
+        "/works/W2.grobid-xml",
+        "/works/W2.pdf",
+    ]
 
 
 def test_irrelevant_paper_counts_toward_bound_without_contributing_evidence() -> None:
@@ -170,6 +183,8 @@ def test_irrelevant_paper_counts_toward_bound_without_contributing_evidence() ->
 
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.host == "api.openalex.org":
+            if request.url.path != "/works":
+                return work_response(request)
             return httpx.Response(200, json={"results": [{"id": "W1"}, {"id": "W2"}]})
         fetched.append(request.url.path)
         return httpx.Response(200, content=XML)
@@ -186,6 +201,9 @@ def test_review_is_sequential_bounded_and_preserves_provider_order() -> None:
 
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.host == "api.openalex.org":
+            if request.url.path != "/works":
+                events.append(request.url.path)
+                return work_response(request)
             events.append("search")
             return httpx.Response(
                 200, json={"results": [{"id": f"W{i}"} for i in (3, 1, 2, 4, 5, 6)]}
@@ -200,28 +218,29 @@ def test_review_is_sequential_bounded_and_preserves_provider_order() -> None:
     assert model.questions == [QUESTION] * 3
     assert events == [
         "search",
+        "/works/W3",
         "/works/W3.grobid-xml",
         "extract",
         "extracted",
+        "/works/W1",
         "/works/W1.grobid-xml",
         "extract",
         "extracted",
+        "/works/W2",
         "/works/W2.grobid-xml",
         "extract",
         "extracted",
     ]
 
 
-@pytest.mark.parametrize(
-    "max_sources,expected_limit", [(1, 2), (20, 40), (25, 50), (26, 50), (50, 50)]
-)
-def test_candidate_compensation_and_empty_search(max_sources: int, expected_limit: int) -> None:
+@pytest.mark.parametrize("max_sources", [1, 20, 25, 26, 50])
+def test_candidate_compensation_and_empty_search(max_sources: int) -> None:
     requests: list[httpx.Request] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
         requests.append(request)
         assert request.url.host == "api.openalex.org"
-        assert request.url.params["per_page"] == str(expected_limit)
+        assert request.url.params["per_page"] == "50"
         assert request.url.params["search.semantic"] == QUESTION
         return httpx.Response(200, json={"results": []})
 
@@ -235,8 +254,10 @@ def test_candidate_compensation_and_empty_search(max_sources: int, expected_limi
 @pytest.mark.parametrize("usable", [False, True])
 def test_exhausted_candidates_return_partial_or_empty_review(usable: bool) -> None:
     def handler(request: httpx.Request) -> httpx.Response:
-        if request.url.host == "api.openalex.org":
+        if request.url.path == "/works":
             return httpx.Response(200, json={"results": [{"id": "W1"}, {"id": "W2"}]})
+        if request.url.host == "api.openalex.org":
+            return work_response(request)
         if usable and request.url.path == "/works/W2.grobid-xml":
             return httpx.Response(200, content=XML)
         return httpx.Response(404)
@@ -255,7 +276,7 @@ def test_general_openalex_failures_propagate(phase: str, fault: str) -> None:
 
     def handler(request: httpx.Request) -> httpx.Response:
         nonlocal failing_calls
-        if phase == "content" and request.url.host == "api.openalex.org":
+        if phase == "content" and request.url.path == "/works":
             return httpx.Response(200, json={"results": [{"id": "W1"}, {"id": "W2"}]})
         failing_calls += 1
         if fault == "transport":
@@ -278,7 +299,8 @@ def test_general_openalex_failures_propagate(phase: str, fault: str) -> None:
         asyncio.run(review_with_transport(handler, model))
     assert error.value.code == expected
     assert str(error.value) == expected
-    assert failing_calls == (3 if fault in {"429", "503", "transport"} else 1)
+    attempts = 3 if fault in {"429", "503", "transport"} else 1
+    assert failing_calls == attempts
     assert model.questions == []
 
 
@@ -298,6 +320,8 @@ def test_model_and_grounding_failures_propagate(
 
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.host == "api.openalex.org":
+            if request.url.path != "/works":
+                return work_response(request)
             return httpx.Response(200, json={"results": [{"id": "W1"}, {"id": "W2"}]})
         fetched.append(request.url.path)
         return httpx.Response(200, content=XML)
@@ -338,6 +362,8 @@ def test_question_at_character_bound_is_passed_unchanged() -> None:
 
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.host == "api.openalex.org":
+            if request.url.path != "/works":
+                return work_response(request)
             assert request.url.params["search.semantic"] == question
             return httpx.Response(200, json={"results": [{"id": "W1"}]})
         return httpx.Response(200, content=XML)
@@ -346,3 +372,77 @@ def test_question_at_character_bound_is_passed_unchanged() -> None:
     review = asyncio.run(review_with_transport(handler, model, question=question))
     assert review.question == question
     assert model.questions == [question]
+
+
+@pytest.mark.parametrize("pdf_backed", [False, True])
+def test_review_reaches_deep_candidates_and_stops_at_usable_paper_limit(
+    pdf_backed: bool,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fetched: list[str] = []
+    projections: list[bytes] = []
+    original = text_pdf() if pdf_backed else XML
+    real_prepare = content_module._project_pdf if pdf_backed else project_grobid  # pyright: ignore[reportPrivateUsage]
+
+    def project(value: bytes) -> bytes:
+        projections.append(value)
+        return real_prepare(value)
+
+    monkeypatch.setattr(content_module, "_project_pdf" if pdf_backed else "project_grobid", project)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/works":
+            assert request.url.params["per_page"] == "50"
+            return httpx.Response(200, json={"results": [{"id": f"W{i}"} for i in range(1, 51)]})
+        fetched.append(request.url.path)
+        if request.url.host == "api.openalex.org":
+            available = request.url.path.rsplit("/", 1)[1] in {"W8", "W9", "W10", "W11"}
+            return work_response(
+                request, grobid=available and not pdf_backed, pdf=available and pdf_backed
+            )
+        extension = "pdf" if pdf_backed else "grobid-xml"
+        if request.url.path in {f"/works/W{i}.{extension}" for i in (8, 9, 10, 11)}:
+            return httpx.Response(200, content=original)
+        return httpx.Response(404)
+
+    model = ReviewModel((proposal_bytes(), b'{"evidence":[]}', proposal_bytes()))
+    review = asyncio.run(review_with_transport(handler, model, max_sources=3))
+    assert review.reviewed_sources == 3
+    assert tuple(result.source.key for result in review.sources) == ("W8", "W10")
+    assert len(model.questions) == 3
+    assert projections == [original] * 3
+    assert all("W11" not in path for path in fetched)
+    assert len(fetched) == 13
+    assert all(result.content_sha256 == sha256(original).hexdigest() for result in review.sources)
+
+
+def test_exhausting_fifty_candidates_without_cached_formats_makes_no_download_requests() -> None:
+    downloads = 0
+    metadata = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal downloads, metadata
+        if request.url.path == "/works":
+            return httpx.Response(200, json={"results": [{"id": f"W{i}"} for i in range(1, 51)]})
+        if request.url.host == "api.openalex.org":
+            metadata += 1
+            return httpx.Response(
+                200,
+                json={
+                    "id": request.url.path.rsplit("/", 1)[1],
+                    "has_content": {"grobid_xml": False, "pdf": False},
+                    "locations": [],
+                },
+            )
+        downloads += 1
+        return (
+            httpx.Response(200, content=text_pdf(""))
+            if request.url.path.endswith(".pdf")
+            else httpx.Response(404)
+        )
+
+    model = ReviewModel(())
+    review = asyncio.run(review_with_transport(handler, model, max_sources=3))
+    assert review == EvidenceReview(QUESTION, 0, ())
+    assert downloads == 0 and metadata == 50
+    assert model.questions == []

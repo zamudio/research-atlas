@@ -5,10 +5,10 @@ from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from research_atlas.content import AcquiredContent, prepare_content
 from research_atlas.embeddings import Embedder
-from research_atlas.grobid import project_grobid
 from research_atlas.models import Evidence, Source, SourceEvidence
-from research_atlas.passages import build_passage_index, select_context
+from research_atlas.passages import select_context
 from research_atlas.providers import StructuredModel
 
 Text = Annotated[str, Field(min_length=1, max_length=4000, pattern=r"\S")]
@@ -57,14 +57,15 @@ async def extract_evidence(
     *,
     question: str,
     source: Source,
-    content: bytes,
+    content: bytes | AcquiredContent,
     model: StructuredModel,
     embedder: Embedder | None = None,
 ) -> SourceEvidence:
-    """Process GROBID XML in memory. The checksum identifies the original XML bytes."""
+    """Extract from prepared content; legacy byte inputs are GROBID XML."""
     if type(question) is not str or not question.strip() or len(question) > 8000:
         raise ValueError("question must be nonblank text of at most 8000 characters")
-    index = build_passage_index(project_grobid(content))
+    acquired = prepare_content(content, "grobid") if isinstance(content, bytes) else content
+    index = acquired.index
     visible = await select_context(index, question, embedder)
     raw = await model.generate(
         EXTRACTION_INSTRUCTIONS + "\nResearch question:\n" + question,
@@ -85,4 +86,4 @@ async def extract_evidence(
         )
         for item in proposal.evidence
     )
-    return SourceEvidence(source, sha256(content).hexdigest(), evidence)
+    return SourceEvidence(source, sha256(acquired.original).hexdigest(), evidence)

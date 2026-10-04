@@ -3,7 +3,7 @@
 from research_atlas.embeddings import Embedder
 from research_atlas.extraction import extract_evidence
 from research_atlas.models import EvidenceReview, SourceEvidence
-from research_atlas.openalex import OpenAlex, OpenAlexError
+from research_atlas.openalex import OpenAlex
 from research_atlas.providers import StructuredModel
 
 
@@ -21,18 +21,11 @@ async def collect_evidence(
     if type(max_sources) is not int or not 1 <= max_sources <= 50:
         raise ValueError("max_sources must be an integer between 1 and 50")
 
-    candidates = await literature.search(
-        question, limit=min(50, max_sources * 2), semantic=True, embedder=embedder
-    )
+    candidates = await literature.search(question, limit=50, semantic=True, embedder=embedder)
     reviewed_sources = 0
     sources: list[SourceEvidence] = []
     for source in candidates:
-        try:
-            content = await literature.fetch_content(source)
-        except OpenAlexError as error:
-            if error.code == "content_size_exceeded":
-                continue
-            raise
+        content = await literature.fetch_content(source)
         if content is None:
             continue
 

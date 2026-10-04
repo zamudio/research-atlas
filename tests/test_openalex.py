@@ -1,3 +1,5 @@
+# Transport-policy tests intentionally exercise the private HTTP boundary.
+# pyright: reportPrivateUsage=false
 import asyncio
 import gzip
 from collections.abc import AsyncIterator
@@ -17,6 +19,18 @@ KEY = SecretStr("private-key")
 
 async def no_sleep(_: float) -> None:
     pass
+
+
+def work_response(
+    request: httpx.Request, *, grobid: bool = True, pdf: bool = True
+) -> httpx.Response:
+    return httpx.Response(
+        200,
+        json={
+            "id": request.url.path.rsplit("/", 1)[1],
+            "has_content": {"grobid_xml": grobid, "pdf": pdf},
+        },
+    )
 
 
 def test_search_maps_ordered_citations_and_normalized_scholarly_identity() -> None:
@@ -152,6 +166,8 @@ def test_search_invalid_response_is_safe(body: bytes) -> None:
 @pytest.mark.parametrize("compressed", [False, True])
 def test_content_returns_exact_decoded_xml(compressed: bool) -> None:
     def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.host == "api.openalex.org":
+            return work_response(request)
         assert str(request.url) == "https://content.openalex.org/works/W123.grobid-xml"
         assert request.headers["Authorization"] == "Bearer private-key"
         assert request.extensions["timeout"] == dict.fromkeys(
@@ -165,7 +181,8 @@ def test_content_returns_exact_decoded_xml(compressed: bool) -> None:
 
     async def scenario() -> None:
         async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-            assert await OpenAlex(KEY, client).fetch_content(SOURCE) == XML
+            result = await OpenAlex(KEY, client).fetch_content(SOURCE)
+            assert result is not None and result.original == XML and result.kind == "grobid"
 
     asyncio.run(scenario())
 
@@ -193,10 +210,21 @@ def test_content_status_and_retry_policy(code: int) -> None:
         ) as client:
             atlas = OpenAlex(KEY, client, retry_sleep=sleep)
             if code == 404:
-                assert await atlas.fetch_content(SOURCE) is None
+                assert (
+                    await atlas._get(
+                        "https://content.openalex.org/works/W123.grobid-xml",
+                        bound=1024,
+                        allow_missing=True,
+                    )
+                    is None
+                )
             else:
                 with pytest.raises(OpenAlexError) as error:
-                    await atlas.fetch_content(SOURCE)
+                    await atlas._get(
+                        "https://content.openalex.org/works/W123.grobid-xml",
+                        bound=1024,
+                        allow_missing=True,
+                    )
                 assert str(error.value) == f"http_{code}"
 
     asyncio.run(scenario())
@@ -205,12 +233,17 @@ def test_content_status_and_retry_policy(code: int) -> None:
 
 
 @pytest.mark.parametrize("body", [b"not XML", b"<TEI", b"<TEI/>", b"<!DOCTYPE a><a/>"])
-def test_content_returns_bytes_without_xml_validation(body: bytes) -> None:
+def test_transport_returns_bytes_without_xml_validation(body: bytes) -> None:
     async def scenario() -> None:
         async with httpx.AsyncClient(
             transport=httpx.MockTransport(lambda _: httpx.Response(200, content=body))
         ) as client:
-            assert await OpenAlex(KEY, client).fetch_content(SOURCE) == body
+            assert (
+                await OpenAlex(KEY, client)._get(
+                    "https://content.openalex.org/works/W123.grobid-xml", bound=1024
+                )
+                == body
+            )
 
     asyncio.run(scenario())
 
@@ -239,7 +272,9 @@ def test_content_safety_and_bounds(fault: str, monkeypatch: pytest.MonkeyPatch) 
     async def scenario() -> None:
         async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
             with pytest.raises(OpenAlexError) as error:
-                await OpenAlex(KEY, client, retry_sleep=no_sleep).fetch_content(SOURCE)
+                await OpenAlex(KEY, client, retry_sleep=no_sleep)._get(
+                    "https://content.openalex.org/works/W123.grobid-xml", bound=256
+                )
             assert "private-key" not in str(error.value)
             assert error.value.__cause__ is None
 

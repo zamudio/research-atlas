@@ -1,15 +1,17 @@
-"""Bounded, stateless OpenAlex search and cached GROBID XML acquisition."""
+"""Bounded, stateless OpenAlex search and scholarly content acquisition."""
 
 import asyncio
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
+from ipaddress import ip_address
 from threading import Lock
 from time import monotonic
 
 import httpx
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, ValidationError
 
+from research_atlas.content import AcquiredContent, ContentKind, UnusableContent, prepare_content
 from research_atlas.embeddings import Embedder, rank_texts
 from research_atlas.models import Source
 
@@ -43,6 +45,13 @@ class _Authorship(_WireModel):
 
 class _Location(_WireModel):
     landing_page_url: str | None = None
+    pdf_url: str | None = None
+    is_oa: bool | None = False
+
+
+class _HasContent(_WireModel):
+    grobid_xml: bool = False
+    pdf: bool = False
 
 
 class _Work(_WireModel):
@@ -52,6 +61,9 @@ class _Work(_WireModel):
     publication_year: int | None = None
     authorships: list[_Authorship] | None = None
     primary_location: _Location | None = None
+    best_oa_location: _Location | None = None
+    locations: list[_Location] | None = None
+    has_content: _HasContent | None = None
     abstract_inverted_index: dict[str, list[int]] | None = None
 
     def source(self) -> Source:
@@ -165,15 +177,101 @@ class OpenAlex:
         except ValidationError, ValueError:
             raise OpenAlexError("malformed_search_response") from None
 
-    async def fetch_content(self, source: Source) -> bytes | None:
-        """Return bounded cached GROBID XML bytes; None means OpenAlex returned 404."""
+    async def fetch_content(self, source: Source) -> AcquiredContent | None:
+        """Try each supported route until original content yields usable passages."""
         if self._key is None or not self._key.get_secret_value().strip():
             raise OpenAlexError("missing_api_key")
-        return await self._get(
-            f"https://content.openalex.org/works/{source.openalex_id}.grobid-xml",
-            bound=MAX_CONTENT_BYTES,
+        raw_work = await self._get(
+            f"https://api.openalex.org/works/{source.openalex_id}",
+            params={"select": "id,has_content,best_oa_location,primary_location,locations"},
+            bound=8 * 1024 * 1024,
             allow_missing=True,
         )
+        if raw_work is None:
+            return None
+        try:
+            work = _Work.model_validate_json(raw_work)
+            if work.source().key != source.key:
+                raise ValueError
+        except ValidationError, ValueError:
+            raise OpenAlexError("malformed_work_response") from None
+
+        available = work.has_content or _HasContent()
+        if available.grobid_xml:
+            acquired = await self._cached_content(source, "grobid")
+            if acquired is not None:
+                return acquired
+
+        urls: list[str] = []
+        for location in (work.best_oa_location, work.primary_location, *(work.locations or ())):
+            if location is None or not location.is_oa or not location.pdf_url:
+                continue
+            if location.pdf_url not in urls and _public_url(location.pdf_url):
+                urls.append(location.pdf_url)
+        for url in urls:
+            acquired = _prepare(await self._external_pdf(url), "pdf")
+            if acquired is not None:
+                return acquired
+        if available.pdf:
+            return await self._cached_content(source, "pdf")
+        return None
+
+    async def _cached_content(self, source: Source, kind: ContentKind) -> AcquiredContent | None:
+        extension = {"grobid": "grobid-xml", "pdf": "pdf"}[kind]
+        try:
+            raw = await self._get(
+                f"https://content.openalex.org/works/{source.openalex_id}.{extension}",
+                bound=MAX_CONTENT_BYTES,
+                allow_missing=True,
+            )
+        except OpenAlexError as error:
+            if not _content_miss(error):
+                raise
+            return None
+        return _prepare(raw, kind)
+
+    async def _external_pdf(self, url: str) -> bytes | None:
+        if self._client is None:
+            async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+                return await OpenAlex(self._key, client)._external_pdf(url)
+        try:
+            # One total deadline and at most three redirects. Explicit Requests omit
+            # client defaults (keys, cookies, auth) on every external hop.
+            async with asyncio.timeout(_TIMEOUT):
+                for hop in range(4):
+                    if not _public_url(url):
+                        return None
+                    request = httpx.Request(
+                        "GET",
+                        url,
+                        headers={"Accept": "application/pdf"},
+                        extensions={
+                            "timeout": dict.fromkeys(("connect", "read", "write", "pool"), _TIMEOUT)
+                        },
+                    )
+                    response = await self._client.send(
+                        request, stream=True, follow_redirects=False, auth=None
+                    )
+                    try:
+                        if response.status_code in (301, 302, 303, 307, 308):
+                            target = response.headers.get("Location")
+                            if target is None or hop == 3:
+                                return None
+                            url = str(response.url.join(target))
+                            continue
+                        if response.status_code != 200:
+                            return None
+                        body = bytearray()
+                        async for chunk in response.aiter_bytes():
+                            if len(body) + len(chunk) > MAX_CONTENT_BYTES:
+                                return None
+                            body.extend(chunk)
+                        return bytes(body)
+                    finally:
+                        await response.aclose()
+        except httpx.HTTPError, httpx.InvalidURL, TimeoutError:
+            return None
+        return None
 
     async def _get(
         self,
@@ -202,6 +300,7 @@ class OpenAlex:
                         url,
                         params=params,
                         headers=headers,
+                        auth=None,
                         timeout=_TIMEOUT,
                         follow_redirects=False,
                     ) as response,
@@ -231,6 +330,43 @@ class OpenAlex:
                 raise OpenAlexError("invalid_response") from None
             await self._sleep(_retry_delay(retry_after, attempt))
         raise AssertionError("unreachable")
+
+
+def _prepare(raw: bytes | None, kind: ContentKind) -> AcquiredContent | None:
+    if raw is None:
+        return None
+    try:
+        return prepare_content(raw, kind)
+    except UnusableContent:
+        return None
+
+
+def _content_miss(error: OpenAlexError) -> bool:
+    # Authentication/budget errors remain actionable system failures. A missing,
+    # broken or oversized individual document can use the next route.
+    return error.code in {
+        "http_404",
+        "http_410",
+        "transport_failure",
+        "content_size_exceeded",
+        "empty_response",
+        "invalid_response",
+    } or error.code.startswith("http_5")
+
+
+def _public_url(value: str) -> bool:
+    try:
+        url = httpx.URL(value)
+    except httpx.InvalidURL:
+        return False
+    if url.scheme not in {"http", "https"} or not url.host or "%" in url.host or url.userinfo:
+        return False
+    if url.host.lower() == "localhost" or url.host.lower().endswith(".localhost"):
+        return False
+    try:
+        return ip_address(url.host).is_global
+    except ValueError:
+        return True
 
 
 async def _pace_semantic() -> None:

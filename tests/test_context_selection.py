@@ -6,7 +6,7 @@ from xml.sax.saxutils import escape
 import httpx
 import pytest
 
-import research_atlas.extraction as extraction_module
+import research_atlas.content as content_module
 import research_atlas.openalex as openalex_module
 import research_atlas.passages as passages_module
 from research_atlas import collect_evidence, extract_evidence
@@ -22,7 +22,7 @@ from research_atlas.passages import (
 )
 from tests.test_embeddings import FakeEmbedder
 from tests.test_extraction import SOURCE, XML, FakeModel, proposal_bytes
-from tests.test_openalex import KEY, no_sleep
+from tests.test_openalex import KEY, no_sleep, work_response
 
 
 def paper(blocks: tuple[str, ...]) -> bytes:
@@ -143,7 +143,7 @@ def test_selected_extraction_grounding_empty_output_and_rejected_ids(
         projections.append(value)
         return project_grobid(value)
 
-    monkeypatch.setattr(extraction_module, "project_grobid", project)
+    monkeypatch.setattr(content_module, "project_grobid", project)
 
     class CheckingModel:
         async def generate(
@@ -187,7 +187,7 @@ def test_large_paper_unavailable_embeddings_preserve_full_paper_extraction(
         projections.append(value)
         return project_grobid(value)
 
-    monkeypatch.setattr(extraction_module, "project_grobid", project)
+    monkeypatch.setattr(content_module, "project_grobid", project)
 
     class FailingEmbedder:
         async def embed(self, texts: tuple[str, ...]) -> tuple[tuple[float, ...], ...]:
@@ -273,6 +273,8 @@ def test_review_shares_embedder_across_discovery_and_large_paper_extraction(
 
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.host == "api.openalex.org":
+            if request.url.path != "/works":
+                return work_response(request)
             if fallback and "search.semantic" in request.url.params:
                 return httpx.Response(401)
             return httpx.Response(200, json={"results": [{"id": "W1", "title": "Learning"}]})
