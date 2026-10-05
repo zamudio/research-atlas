@@ -1,14 +1,6 @@
-"""In-memory scholarly search and question-relevant evidence extraction."""
+"""A bounded scholarly-evidence pipeline, with no model service required."""
 
-from research_atlas.extraction import extract_evidence
-from research_atlas.models import Evidence, EvidenceReview, Source, SourceEvidence
-from research_atlas.research import collect_evidence
+from research_atlas.models import ContentSource, Document, Evidence, EvidenceResult, Failure, Work
+from research_atlas.pipeline import evidence
 
-__all__ = [
-    "Evidence",
-    "EvidenceReview",
-    "Source",
-    "SourceEvidence",
-    "collect_evidence",
-    "extract_evidence",
-]
+__all__ = ["ContentSource", "Document", "Evidence", "EvidenceResult", "Failure", "Work", "evidence"]

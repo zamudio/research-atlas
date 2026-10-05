@@ -1,62 +1,66 @@
-"""Paper-level citation metadata and question-relevant, grounded evidence."""
+"""Small typed contracts for acquired full text and ranked source passages."""
 
 import re
-from dataclasses import dataclass
+from typing import Literal
+
+from pydantic import BaseModel, Field, field_validator
 
 
-def normalize_openalex_id(value: str) -> str:
-    value = re.sub(r"^https?://openalex\.org/", "", value.strip(), flags=re.IGNORECASE)
-    value = value.rstrip("/").upper()
-    if not re.fullmatch(r"W[1-9][0-9]*", value):
-        raise ValueError("invalid OpenAlex work ID")
-    return value
+class ContentSource(BaseModel):
+    kind: Literal["grobid_xml", "oa_pdf", "openalex_pdf"]
+    url: str
 
 
-def normalize_doi(value: str) -> str:
-    value = re.sub(
-        r"^(?:https?://(?:dx\.)?doi\.org/|doi:\s*)", "", value.strip(), flags=re.IGNORECASE
-    ).lower()
-    if not re.fullmatch(r"10\.[0-9]{4,9}/\S+", value):
-        raise ValueError("invalid DOI")
-    return value
-
-
-@dataclass(frozen=True, slots=True)
-class Source:
-    title: str
-    authors: tuple[str, ...]
-    year: int | None
+class Work(BaseModel):
     openalex_id: str
+    title: str
     doi: str | None = None
-    url: str | None = None
+    year: int | None = None
+    # Acquisition input is omitted from JSON; source records the successful route.
+    routes: tuple[ContentSource, ...] = Field(default=(), exclude=True, repr=False)
 
-    def __post_init__(self) -> None:
-        object.__setattr__(self, "openalex_id", normalize_openalex_id(self.openalex_id))
-        if self.doi is not None:
-            object.__setattr__(self, "doi", normalize_doi(self.doi))
-
-    @property
-    def key(self) -> str:
-        return self.openalex_id
-
-
-@dataclass(frozen=True, slots=True)
-class Evidence:
-    summary: str
-    passages: tuple[str, ...]
-    context: str | None
-    limitations: str | None
+    @field_validator("openalex_id")
+    @classmethod
+    def canonical_id(cls, value: str) -> str:
+        value = re.sub(r"^https?://openalex\.org/", "", value.strip(), flags=re.IGNORECASE)
+        value = value.rstrip("/").upper()
+        if not re.fullmatch(r"W[1-9][0-9]*", value):
+            raise ValueError("invalid OpenAlex work ID")
+        return value
 
 
-@dataclass(frozen=True, slots=True)
-class SourceEvidence:
-    source: Source
-    content_sha256: str
+class Passage(BaseModel):
+    passage_id: str
+    section: str | None
+    text: str
+
+
+class Document(BaseModel):
+    work: Work
+    source: ContentSource
+    passages: tuple[Passage, ...]
+
+
+class Evidence(BaseModel):
+    passage_id: str
+    section: str | None
+    text: str
+    score: float = Field(ge=0, allow_inf_nan=False)
+
+
+class PaperEvidence(BaseModel):
+    work: Work
+    source: ContentSource
     evidence: tuple[Evidence, ...]
 
 
-@dataclass(frozen=True, slots=True)
-class EvidenceReview:
+class Failure(BaseModel):
+    openalex_id: str | None
+    stage: Literal["discovery", "acquisition", "preparation"]
+    reason: str
+
+
+class EvidenceResult(BaseModel):
     question: str
-    reviewed_sources: int
-    sources: tuple[SourceEvidence, ...]
+    papers: tuple[PaperEvidence, ...]
+    failures: tuple[Failure, ...]
