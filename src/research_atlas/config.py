@@ -23,7 +23,7 @@ class ProviderSettings(BaseSettings):
     openrouter_api_key: SecretStr | None = None
     deepseek_api_key: SecretStr | None = None
     openai_compatible_api_key: SecretStr | None = None
-    model_timeout_seconds: float = Field(default=600, gt=0, le=1800)
+    model_timeout_seconds: float = Field(default=300, gt=0, le=1800)
     model_max_output_tokens: int = Field(default=8192, gt=0, le=131072)
 
     @field_validator("model_context_tokens", mode="before")
