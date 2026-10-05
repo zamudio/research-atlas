@@ -35,9 +35,18 @@ def proposal_bytes(ids: tuple[str, ...] = ("p0001",)) -> bytes:
 
 
 class FakeModel:
-    def __init__(self, raw: bytes) -> None:
+    def __init__(self, raw: bytes, *, context_tokens: int | None = None) -> None:
         self.raw = raw
         self.calls = 0
+        self.context_tokens = context_tokens
+
+    async def fits_context(
+        self, instructions: str, input_text: str, schema: Mapping[str, object]
+    ) -> bool:
+        if self.context_tokens is None:
+            return True
+        material = {"instructions": instructions, "input": input_text, "schema": dict(schema)}
+        return len(json.dumps(material, ensure_ascii=False).encode()) + 7 <= self.context_tokens
 
     async def generate(
         self, instructions: str, input_text: str, schema: Mapping[str, object]
@@ -57,7 +66,7 @@ class FakeModel:
 def test_question_controls_relevance_and_is_preserved_exactly(
     question: str, expected: str | None
 ) -> None:
-    class QuestionModel:
+    class QuestionModel(FakeModel):
         async def generate(
             self, instructions: str, input_text: str, schema: Mapping[str, object]
         ) -> bytes:
@@ -83,7 +92,7 @@ def test_question_controls_relevance_and_is_preserved_exactly(
             return b'{"evidence": []}'
 
     result = asyncio.run(
-        extract_evidence(question=question, source=SOURCE, content=XML, model=QuestionModel())
+        extract_evidence(question=question, source=SOURCE, content=XML, model=QuestionModel(b""))
     )
     assert tuple(p for e in result.evidence for p in e.passages) == (
         (expected,) if expected is not None else ()

@@ -11,8 +11,10 @@ from research_atlas.providers import (
 )
 from research_atlas.providers._config import (
     model_base_url,
+    model_context_capacity,
     model_credential,
     model_name,
+    request_fits_context,
 )
 from research_atlas.providers._http import (
     array_items,
@@ -35,6 +37,35 @@ class GeminiInteractionsModel:
         )
         self._timeout = settings.model_timeout_seconds
         self._client = client
+        self._context_tokens = model_context_capacity(settings, "gemini")
+        self._output_tokens = settings.model_max_output_tokens
+
+    def _payload(
+        self, instructions: str, input_text: str, schema: Mapping[str, object]
+    ) -> dict[str, object]:
+        return {
+            "model": self._model,
+            "system_instruction": instructions,
+            "input": [{"type": "user_input", "content": [{"type": "text", "text": input_text}]}],
+            "stream": False,
+            "store": False,
+            "background": False,
+            "response_format": {
+                "type": "text",
+                "mime_type": "application/json",
+                "schema": gemini_schema(schema),
+            },
+        }
+
+    async def fits_context(
+        self, instructions: str, input_text: str, schema: Mapping[str, object]
+    ) -> bool:
+        return request_fits_context(
+            self._payload(instructions, input_text, schema),
+            self._context_tokens,
+            self._output_tokens,
+            "gemini",
+        )
 
     async def generate(
         self, instructions: str, input_text: str, schema: Mapping[str, object]
@@ -43,21 +74,7 @@ class GeminiInteractionsModel:
         fields = await post_json(
             self._client,
             self._base_url + "/interactions",
-            {
-                "model": self._model,
-                "system_instruction": instructions,
-                "input": [
-                    {"type": "user_input", "content": [{"type": "text", "text": input_text}]}
-                ],
-                "stream": False,
-                "store": False,
-                "background": False,
-                "response_format": {
-                    "type": "text",
-                    "mime_type": "application/json",
-                    "schema": gemini_schema(schema),
-                },
-            },
+            self._payload(instructions, input_text, schema),
             {"x-goog-api-key": self._key.get_secret_value()},
             self._timeout,
             "gemini",

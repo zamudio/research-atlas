@@ -9,6 +9,12 @@ class ModelProviderError(Exception):
 
 
 class StructuredModel(Protocol):
+    async def fits_context(
+        self, instructions: str, input_text: str, schema: Mapping[str, object]
+    ) -> bool:
+        """Whether the complete request, including output reserve, fits this model."""
+        ...
+
     async def generate(
         self, instructions: str, input_text: str, schema: Mapping[str, object]
     ) -> bytes: ...

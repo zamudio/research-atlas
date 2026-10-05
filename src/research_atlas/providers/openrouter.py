@@ -8,8 +8,10 @@ from research_atlas.config import ProviderSettings
 from research_atlas.providers._chat_completions import chat_payload, chat_text
 from research_atlas.providers._config import (
     model_base_url,
+    model_context_capacity,
     model_credential,
     model_name,
+    request_fits_context,
 )
 from research_atlas.providers._http import (
     bearer_headers,
@@ -28,16 +30,33 @@ class OpenRouterModel:
         self._base_url = model_base_url(settings, "https://openrouter.ai/api/v1", api_key=self._key)
         self._timeout = settings.model_timeout_seconds
         self._client = client
+        self._context_tokens = model_context_capacity(settings, "openrouter")
+        self._output_tokens = settings.model_max_output_tokens
+
+    def _payload(
+        self, instructions: str, input_text: str, schema: Mapping[str, object]
+    ) -> dict[str, object]:
+        payload = chat_payload(self._model, instructions, input_text, schema)
+        payload["provider"] = {"require_parameters": True, "allow_fallbacks": False}
+        return payload
+
+    async def fits_context(
+        self, instructions: str, input_text: str, schema: Mapping[str, object]
+    ) -> bool:
+        return request_fits_context(
+            self._payload(instructions, input_text, schema),
+            self._context_tokens,
+            self._output_tokens,
+            "openrouter",
+        )
 
     async def generate(
         self, instructions: str, input_text: str, schema: Mapping[str, object]
     ) -> bytes:
-        payload = chat_payload(self._model, instructions, input_text, schema)
-        payload["provider"] = {"require_parameters": True, "allow_fallbacks": False}
         fields = await post_json(
             self._client,
             self._base_url + "/chat/completions",
-            payload,
+            self._payload(instructions, input_text, schema),
             bearer_headers(self._key),
             self._timeout,
             "openrouter",

@@ -79,7 +79,7 @@ def test_all_providers_use_canonical_validation_and_grounding(
 
     async def scenario() -> None:
         async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-            model = create_structured_model(settings(case), client)
+            model = create_structured_model(settings(case, model_context_tokens=16384), client)
             if fault:
                 with pytest.raises(ValueError):
                     await extract_evidence(
@@ -390,6 +390,93 @@ def test_exact_request_auth_and_cross_provider_result(
 
     run(scenario())
     assert calls == (2 if case.name == "ollama" else 1) and schema == canonical
+
+
+@pytest.mark.parametrize(
+    "case", [case for case in CASES if case.name != "ollama"], ids=lambda case: case.name
+)
+@pytest.mark.parametrize("margin", [-1, 0, 1])
+def test_hosted_context_fit_includes_complete_wire_request_and_output_reserve(
+    case: ProviderCase, margin: int
+) -> None:
+    schema = ExtractionProposal.model_json_schema()
+    indexed = build_passage_index('Quote " and Unicode β.\n'.encode()).model_text
+    payload = expected_payload(case, schema, indexed)
+    if case.name == "anthropic":
+        payload["max_tokens"] = 7
+    required = len(json.dumps(payload, ensure_ascii=False).encode()) + 7
+    calls = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        assert json.loads(request.content) == payload
+        return httpx.Response(200, json=envelope(case))
+
+    async def scenario() -> None:
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            model = create_structured_model(
+                settings(case, model_context_tokens=required + margin, model_max_output_tokens=7),
+                client,
+            )
+            assert await model.fits_context(EXTRACTION_INSTRUCTIONS, indexed, schema) is (
+                margin >= 0
+            )
+            assert calls == 0
+            assert await model.generate(EXTRACTION_INSTRUCTIONS, indexed, schema) == RAW.encode()
+
+    run(scenario())
+    assert calls == 1
+
+
+@pytest.mark.parametrize(
+    "case", [case for case in CASES if case.name != "ollama"], ids=lambda case: case.name
+)
+def test_unknown_hosted_model_context_fails_safely_without_io(case: ProviderCase) -> None:
+    def handler(_: httpx.Request) -> httpx.Response:
+        pytest.fail("unknown context capacity must fail before generation I/O")
+
+    async def scenario() -> None:
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            model = create_structured_model(settings(case), client)
+            with pytest.raises(ModelProviderError) as error:
+                await model.fits_context("private instructions", "private input", {"private": KEY})
+            assert str(error.value) == case.name + "_context_capacity_required"
+            assert error.value.__cause__ is None
+
+    run(scenario())
+
+
+@pytest.mark.parametrize(
+    "provider_name,model_name",
+    [
+        ("openai", "gpt-6.1-sol"),
+        ("anthropic", "claude-sonnet-5-5"),
+        ("gemini", "gemini-3.8-flash"),
+        ("kimi", "kimi-k3"),
+        ("deepseek", "deepseek-flash"),
+        ("openrouter", "anthropic/claude-sonnet-5.5"),
+    ],
+)
+def test_known_hosted_models_extract_without_manual_context_capacity(
+    provider_name: str, model_name: str
+) -> None:
+    case = next(case for case in CASES if case.name == provider_name)
+    calls = 0
+
+    def handler(_: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        return httpx.Response(200, json=envelope(case))
+
+    async def scenario() -> None:
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            model = create_structured_model(settings(case, model_name=model_name), client)
+            result = await extract_evidence(question="q", source=SOURCE, content=XML, model=model)
+            assert result.evidence[0].passages == (PASSAGE,)
+
+    run(scenario())
+    assert calls == 1
 
 
 @pytest.mark.parametrize("case", NEW_CASES, ids=lambda case: case.name)

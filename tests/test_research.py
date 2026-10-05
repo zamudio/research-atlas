@@ -21,19 +21,20 @@ from research_atlas.openalex import OpenAlex, OpenAlexError
 from research_atlas.providers import ModelProviderError, StructuredModel
 from tests.test_content import text_pdf
 from tests.test_embeddings import FakeEmbedder
-from tests.test_extraction import OTHER, PASSAGE, XML, proposal_bytes
+from tests.test_extraction import OTHER, PASSAGE, XML, FakeModel, proposal_bytes
 from tests.test_openalex import KEY, no_sleep
 
 QUESTION = "  What does response time tell us about learning?\n"
 LEXICAL_QUESTION = "What does response time tell us about learning"
 
 
-class ReviewModel:
+class ReviewModel(FakeModel):
     def __init__(
         self,
         replies: tuple[bytes | Exception, ...] = (proposal_bytes(),),
         events: list[str] | None = None,
     ) -> None:
+        super().__init__(b"")
         self.replies = replies
         self.events = events
         self.questions: list[str] = []

@@ -61,7 +61,7 @@ class OllamaModel:
         self._template_bytes = 0
         self._model_message_overhead = 0
 
-    async def _context_ceiling(self, client: httpx.AsyncClient) -> int:
+    async def _context_ceiling(self, client: httpx.AsyncClient | None) -> int:
         if self._advertised_context is None:
             fields = await post_json(
                 client,
@@ -108,6 +108,26 @@ class OllamaModel:
             return self._context_override
         return self._advertised_context
 
+    def _context_requirement(
+        self, instructions: str, input_text: str, schema: Mapping[str, object]
+    ) -> int:
+        return _request_context_tokens(
+            [
+                {"role": "system", "content": instructions},
+                {"role": "user", "content": input_text},
+            ],
+            schema,
+            self._template_bytes,
+            self._model_message_overhead,
+            self._max_output_tokens,
+        )
+
+    async def fits_context(
+        self, instructions: str, input_text: str, schema: Mapping[str, object]
+    ) -> bool:
+        ceiling = await self._context_ceiling(self._client)
+        return self._context_requirement(instructions, input_text, schema) <= ceiling
+
     async def generate(
         self, instructions: str, input_text: str, schema: Mapping[str, object]
     ) -> bytes:
@@ -129,13 +149,7 @@ class OllamaModel:
             {"role": "user", "content": input_text},
         ]
         output_schema = dict(schema)
-        context_tokens = _request_context_tokens(
-            messages,
-            output_schema,
-            self._template_bytes,
-            self._model_message_overhead,
-            self._max_output_tokens,
-        )
+        context_tokens = self._context_requirement(instructions, input_text, output_schema)
         if context_tokens > ceiling:
             raise ModelProviderError("ollama_context_requirement_exceeds_limit")
         payload = {

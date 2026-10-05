@@ -62,13 +62,13 @@ def test_malformed_fake_vectors_fail_before_ranking(vectors: object) -> None:
         asyncio.run(rank_texts("q", ("text",), embedder))
 
 
-@pytest.mark.parametrize("identity", ["all-minilm", "all-minilm:latest"])
+@pytest.mark.parametrize("identity", ["nomic-embed-text", "nomic-embed-text:latest"])
 def test_ollama_embedding_request_contract(identity: str) -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         assert str(request.url) == "http://localhost:11434/api/embed"
         assert "Authorization" not in request.headers
         assert json.loads(request.content) == {
-            "model": "all-minilm",
+            "model": "nomic-embed-text",
             "input": [" question\n", "Exact passage."],
             "truncate": True,
         }
@@ -83,6 +83,54 @@ def test_ollama_embedding_request_contract(identity: str) -> None:
             assert await embedder.embed((" question\n", "Exact passage.")) == ((1, 0), (0.5, 1))
 
     asyncio.run(scenario())
+
+
+@pytest.mark.parametrize(
+    "count,batch_sizes", [(128, [128]), (129, [128, 1]), (385, [128, 128, 128, 1])]
+)
+def test_ollama_embedding_batches_are_sequential_and_preserve_order(
+    count: int, batch_sizes: list[int]
+) -> None:
+    texts = tuple(f" passage {index}\n" for index in range(count))
+    calls: list[list[str]] = []
+    in_flight = False
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal in_flight
+        assert not in_flight
+        in_flight = True
+        await asyncio.sleep(0)
+        start = sum(len(batch) for batch in calls)
+        batch = list(texts[start : start + batch_sizes[len(calls)]])
+        assert str(request.url) == "http://localhost:11434/api/embed"
+        assert "Authorization" not in request.headers
+        assert json.loads(request.content) == {
+            "model": "nomic-embed-text",
+            "input": batch,
+            "truncate": True,
+        }
+        assert request.extensions["timeout"] == dict.fromkeys(
+            ("connect", "read", "write", "pool"), 600
+        )
+        calls.append(batch)
+        in_flight = False
+        return httpx.Response(
+            200,
+            json={
+                "model": "nomic-embed-text:latest" if len(calls) % 2 else "nomic-embed-text",
+                "embeddings": [[index + 1, -index] for index in range(start, start + len(batch))],
+            },
+        )
+
+    async def scenario() -> None:
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            assert await OllamaEmbedder(client=client).embed(texts) == tuple(
+                (index + 1, -index) for index in range(count)
+            )
+
+    asyncio.run(scenario())
+    assert [len(batch) for batch in calls] == batch_sizes
+    assert tuple(text for batch in calls for text in batch) == texts
 
 
 @pytest.mark.parametrize(
@@ -107,7 +155,9 @@ def test_ollama_embedding_malformed_envelopes_are_safe(body: bytes) -> None:
             transport=httpx.MockTransport(lambda _: httpx.Response(200, content=body))
         ) as client:
             with pytest.raises(EmbeddingError) as error:
-                await OllamaEmbedder(client=client).embed(("q", "text"))
+                await OllamaEmbedder(
+                    ProviderSettings(embedding_model_name="all-minilm"), client
+                ).embed(("q", "text"))
             assert "credential" not in str(error.value)
             assert error.value.__cause__ is None
 
@@ -115,25 +165,96 @@ def test_ollama_embedding_malformed_envelopes_are_safe(body: bytes) -> None:
 
 
 @pytest.mark.parametrize("fault", ["http", "redirect", "transport", "timeout"])
-def test_ollama_embedding_provider_failures_are_safe(fault: str) -> None:
+@pytest.mark.parametrize("failed_batch", [1, 2])
+def test_ollama_embedding_provider_failures_are_safe(fault: str, failed_batch: int) -> None:
+    calls = 0
+
     def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        assert request.headers["Authorization"] == "Bearer private-key"
+        if calls < failed_batch:
+            return httpx.Response(
+                200, json={"model": "nomic-embed-text:latest", "embeddings": [[1]] * 128}
+            )
         if fault == "transport":
-            raise httpx.ConnectError("credential", request=request)
+            raise httpx.ConnectError("credential private-key private-input", request=request)
         if fault == "timeout":
-            raise httpx.ReadTimeout("credential", request=request)
-        return httpx.Response(302 if fault == "redirect" else 503, text="credential")
+            raise httpx.ReadTimeout("credential private-key private-input", request=request)
+        return httpx.Response(
+            302 if fault == "redirect" else 503, text="credential private-key private-input"
+        )
 
     async def scenario() -> None:
         async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
             with pytest.raises(EmbeddingError) as error:
-                await OllamaEmbedder(client=client).embed(("q",))
-            assert "credential" not in str(error.value)
+                await OllamaEmbedder(
+                    ProviderSettings(ollama_api_key=SecretStr("private-key")), client
+                ).embed(("private-input",) * 257)
+            assert str(error.value) == (
+                "ollama_embedding_http_failure"
+                if fault in ("http", "redirect")
+                else "ollama_embedding_transport_failure"
+            )
             assert error.value.__cause__ is None
 
     asyncio.run(scenario())
+    assert calls == failed_batch
+
+
+@pytest.mark.parametrize(
+    "body,code",
+    [
+        (b"credential private-key private-input", "ollama_embedding_malformed_envelope"),
+        (b"[]", "ollama_embedding_malformed_envelope"),
+        (b"{}", "ollama_embedding_model_identity_mismatch"),
+        (
+            json.dumps({"model": "nomic-embed-text:other", "embeddings": [[1]] * 128}).encode(),
+            "ollama_embedding_model_identity_mismatch",
+        ),
+        (
+            json.dumps({"model": "nomic-embed-text", "embeddings": [[1]]}).encode(),
+            "malformed_embedding_vectors",
+        ),
+        (
+            json.dumps(
+                {"model": "nomic-embed-text", "embeddings": [[1]] * 127 + [["private-key"]]}
+            ).encode(),
+            "malformed_embedding_vectors",
+        ),
+        (
+            json.dumps({"model": "nomic-embed-text", "embeddings": [[1, 2]] * 128}).encode(),
+            "malformed_embedding_vectors",
+        ),
+    ],
+)
+def test_ollama_embedding_bad_later_batch_stops_safely(body: bytes, code: str) -> None:
+    calls = 0
+
+    def handler(_: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return httpx.Response(
+                200, json={"model": "nomic-embed-text:latest", "embeddings": [[1]] * 128}
+            )
+        return httpx.Response(200, content=body)
+
+    async def scenario() -> None:
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            with pytest.raises(EmbeddingError) as error:
+                await OllamaEmbedder(
+                    ProviderSettings(ollama_api_key=SecretStr("private-key")), client
+                ).embed(("private-input",) * 257)
+            assert str(error.value) == code
+            assert error.value.__cause__ is None
+
+    asyncio.run(scenario())
+    assert calls == 2
 
 
 def test_embedding_factory_and_environment_are_independent(monkeypatch: pytest.MonkeyPatch) -> None:
+    assert ProviderSettings().embedding_model_name == "nomic-embed-text"
     assert create_embedder(ProviderSettings()) is None
     monkeypatch.setenv("RESEARCH_ATLAS_EMBEDDING_PROVIDER", "ollama")
     monkeypatch.setenv("RESEARCH_ATLAS_EMBEDDING_MODEL_NAME", "all-minilm:latest")
@@ -194,7 +315,16 @@ def test_embedding_credentials_require_secure_remote_endpoint() -> None:
     assert "private-key" not in str(error.value)
 
 
-@pytest.mark.parametrize("texts", [(), (" ",), ("q", "")])
-def test_embedding_input_validation_precedes_io(texts: tuple[str, ...]) -> None:
-    with pytest.raises(ValueError, match="nonblank"):
-        asyncio.run(OllamaEmbedder().embed(texts))
+@pytest.mark.parametrize(
+    "texts", [(), (" ",), ("q", ""), ("q", None), ("q", 1), ("q",) * 128 + (" ",)]
+)
+def test_embedding_input_validation_precedes_io(texts: tuple[object, ...]) -> None:
+    def handler(_: httpx.Request) -> httpx.Response:
+        pytest.fail("invalid inputs must fail before any HTTP request")
+
+    async def scenario() -> None:
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            with pytest.raises(ValueError, match="nonblank"):
+                await OllamaEmbedder(client=client).embed(cast(tuple[str, ...], texts))
+
+    asyncio.run(scenario())

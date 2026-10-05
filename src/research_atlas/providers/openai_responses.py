@@ -10,8 +10,10 @@ from research_atlas.providers import (
 )
 from research_atlas.providers._config import (
     model_base_url,
+    model_context_capacity,
     model_credential,
     model_name,
+    request_fits_context,
 )
 from research_atlas.providers._http import (
     bearer_headers,
@@ -37,6 +39,18 @@ class OpenAIResponsesModel:
         )
         self._timeout = settings.model_timeout_seconds
         self._client = client
+        self._context_tokens = model_context_capacity(settings, "openai")
+        self._output_tokens = settings.model_max_output_tokens
+
+    async def fits_context(
+        self, instructions: str, input_text: str, schema: Mapping[str, object]
+    ) -> bool:
+        return request_fits_context(
+            self._payload(instructions, input_text, schema),
+            self._context_tokens,
+            self._output_tokens,
+            "openai",
+        )
 
     async def generate(
         self, instructions: str, input_text: str, schema: Mapping[str, object]
@@ -46,14 +60,13 @@ class OpenAIResponsesModel:
         async with httpx.AsyncClient(timeout=self._timeout) as client:
             return await self._generate(client, instructions, input_text, schema)
 
-    async def _generate(
+    def _payload(
         self,
-        client: httpx.AsyncClient,
         instructions: str,
         input_text: str,
         schema: Mapping[str, object],
-    ) -> bytes:
-        payload = {
+    ) -> dict[str, object]:
+        return {
             "model": self._model,
             "instructions": instructions,
             "input": input_text,
@@ -67,10 +80,18 @@ class OpenAIResponsesModel:
                 }
             },
         }
+
+    async def _generate(
+        self,
+        client: httpx.AsyncClient,
+        instructions: str,
+        input_text: str,
+        schema: Mapping[str, object],
+    ) -> bytes:
         fields = await post_json(
             client,
             self._base_url + "/responses",
-            payload,
+            self._payload(instructions, input_text, schema),
             bearer_headers(self._api_key),
             self._timeout,
             "openai",

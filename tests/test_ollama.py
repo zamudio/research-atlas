@@ -493,6 +493,7 @@ def test_ollama_request_respects_model_and_user_ceiling_including_equality(
                 ),
                 client,
             )
+            assert await provider.fits_context("i", "d", {}) is (margin >= 0)
             if margin < 0:
                 with pytest.raises(ModelProviderError) as error:
                     await provider.generate("i", "d", {})

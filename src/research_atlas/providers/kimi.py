@@ -9,8 +9,10 @@ from research_atlas.config import ProviderSettings
 from research_atlas.providers._chat_completions import chat_payload, chat_text
 from research_atlas.providers._config import (
     model_base_url,
+    model_context_capacity,
     model_credential,
     model_name,
+    request_fits_context,
 )
 from research_atlas.providers._http import (
     array_items,
@@ -31,6 +33,18 @@ class KimiModel:
         self._base_url = model_base_url(settings, "https://api.moonshot.ai/v1", api_key=self._key)
         self._timeout = settings.model_timeout_seconds
         self._client = client
+        self._context_tokens = model_context_capacity(settings, "kimi")
+        self._output_tokens = settings.model_max_output_tokens
+
+    async def fits_context(
+        self, instructions: str, input_text: str, schema: Mapping[str, object]
+    ) -> bool:
+        return request_fits_context(
+            chat_payload(self._model, instructions, input_text, kimi_schema(schema)),
+            self._context_tokens,
+            self._output_tokens,
+            "kimi",
+        )
 
     async def generate(
         self, instructions: str, input_text: str, schema: Mapping[str, object]

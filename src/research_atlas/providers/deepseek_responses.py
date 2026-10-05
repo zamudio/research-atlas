@@ -11,8 +11,10 @@ from research_atlas.providers import (
 )
 from research_atlas.providers._config import (
     model_base_url,
+    model_context_capacity,
     model_credential,
     model_name,
+    request_fits_context,
 )
 from research_atlas.providers._http import (
     bearer_headers,
@@ -32,6 +34,35 @@ class DeepSeekResponsesModel:
         self._base_url = model_base_url(settings, "https://api.deepseek.com", api_key=self._key)
         self._timeout = settings.model_timeout_seconds
         self._client = client
+        self._context_tokens = model_context_capacity(settings, "deepseek")
+        self._output_tokens = settings.model_max_output_tokens
+
+    def _payload(
+        self, instructions: str, input_text: str, schema: Mapping[str, object]
+    ) -> dict[str, object]:
+        return {
+            "model": self._model,
+            "instructions": instructions,
+            "input": input_text,
+            "stream": False,
+            "text": {
+                "format": {
+                    "type": "json_schema",
+                    "name": "atlas_output",
+                    "schema": dict(schema),
+                }
+            },
+        }
+
+    async def fits_context(
+        self, instructions: str, input_text: str, schema: Mapping[str, object]
+    ) -> bool:
+        return request_fits_context(
+            self._payload(instructions, input_text, schema),
+            self._context_tokens,
+            self._output_tokens,
+            "deepseek",
+        )
 
     async def generate(
         self, instructions: str, input_text: str, schema: Mapping[str, object]
@@ -41,19 +72,7 @@ class DeepSeekResponsesModel:
         fields = await post_json(
             self._client,
             self._base_url + "/responses",
-            {
-                "model": self._model,
-                "instructions": instructions,
-                "input": input_text,
-                "stream": False,
-                "text": {
-                    "format": {
-                        "type": "json_schema",
-                        "name": "atlas_output",
-                        "schema": dict(schema),
-                    }
-                },
-            },
+            self._payload(instructions, input_text, schema),
             bearer_headers(self._key),
             self._timeout,
             "deepseek",

@@ -1,13 +1,13 @@
 """Temporary passage labels over exact prepared GROBID blocks; no text splitting."""
 
-from collections.abc import Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from types import MappingProxyType
 
 from research_atlas.embeddings import Embedder, rank_texts
+from research_atlas.providers import ModelProviderError
 
 MAX_PASSAGE_CHARACTERS = 20_000
-PAPER_CONTEXT_CHARACTERS = 60_000
 PASSAGE_EMBEDDING_CHARACTERS = 4_000
 
 
@@ -45,34 +45,39 @@ def build_passage_index(content: bytes) -> PassageIndex:
 
 
 async def select_context(
-    index: PassageIndex, question: str, embedder: Embedder | None
+    index: PassageIndex,
+    question: str,
+    embedder: Embedder | None,
+    fits_context: Callable[[str], Awaitable[bool]],
 ) -> PassageIndex:
-    """Reduce large papers with a configured embedder; propagate embedding failures."""
-    if embedder is None or len(index.model_text) <= PAPER_CONTEXT_CHARACTERS:
+    """Reduce only requests that exceed the generation model's context capacity."""
+    if await fits_context(index.model_text):
         return index
+    if embedder is None:
+        raise ModelProviderError("context_reduction_requires_embedder")
     passages = tuple(index.passages.items())
     order = await rank_texts(
         question, tuple(text[:PASSAGE_EMBEDDING_CHARACTERS] for _, text in passages), embedder
     )
     selected: set[int] = set()
-    # Each entry costs its ID, text, and two separating newlines; the last costs one less.
-    used = -1
+
+    def view(positions: set[int]) -> PassageIndex:
+        return PassageIndex(
+            MappingProxyType(
+                {key: text for i, (key, text) in enumerate(passages) if i in positions}
+            )
+        )
+
     for hit in order:
         if hit not in selected:
-            key, text = passages[hit]
-            cost = len(key) + len(text) + 5
-            if used + cost > PAPER_CONTEXT_CHARACTERS:
+            if not await fits_context(view(selected | {hit}).model_text):
                 continue
             selected.add(hit)
-            used += cost
         for position in (hit - 1, hit + 1):
             if not 0 <= position < len(passages) or position in selected:
                 continue
-            key, text = passages[position]
-            cost = len(key) + len(text) + 5
-            if used + cost <= PAPER_CONTEXT_CHARACTERS:
+            if await fits_context(view(selected | {position}).model_text):
                 selected.add(position)
-                used += cost
-    return PassageIndex(
-        MappingProxyType({key: text for i, (key, text) in enumerate(passages) if i in selected})
-    )
+    if not selected:
+        raise ModelProviderError("context_capacity_cannot_fit_passage")
+    return view(selected)

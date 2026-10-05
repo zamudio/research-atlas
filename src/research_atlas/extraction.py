@@ -66,12 +66,14 @@ async def extract_evidence(
         raise ValueError("question must be nonblank text of at most 8000 characters")
     acquired = prepare_content(content, "grobid") if isinstance(content, bytes) else content
     index = acquired.index
-    visible = await select_context(index, question, embedder)
-    raw = await model.generate(
-        EXTRACTION_INSTRUCTIONS + "\nResearch question:\n" + question,
-        visible.model_text,
-        ExtractionProposal.model_json_schema(),
-    )
+    instructions = EXTRACTION_INSTRUCTIONS + "\nResearch question:\n" + question
+    schema = ExtractionProposal.model_json_schema()
+
+    async def fits_context(input_text: str) -> bool:
+        return await model.fits_context(instructions, input_text, schema)
+
+    visible = await select_context(index, question, embedder, fits_context)
+    raw = await model.generate(instructions, visible.model_text, schema)
     proposal = ExtractionProposal.model_validate_json(raw)
     for item in proposal.evidence:
         for locator in item.evidence_passage_ids:

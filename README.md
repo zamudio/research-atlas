@@ -28,6 +28,18 @@ or an OpenAI-compatible endpoint. Cloud providers need their corresponding key;
 local endpoints can run without credentials. Authenticated endpoints require HTTPS
 except on loopback. Set `RESEARCH_ATLAS_MODEL_BASE_URL` for a compatible endpoint.
 
+Extraction checks the complete request against the selected model's context capacity,
+including instructions, question, schema, framing, and output reserve. Ollama discovers
+its model's advertised maximum; `RESEARCH_ATLAS_MODEL_CONTEXT_TOKENS` can lower that
+ceiling. Hosted providers use a small built-in mapping of documented model capacities;
+this setting can lower a known capacity or supply one for an unknown model. Unknown
+hosted models and compatible endpoints require an explicit capacity.
+Request sizing conservatively reserves one token per serialized UTF-8 byte. Papers
+that fit are passed whole. Otherwise configure an Ollama embedder with
+`RESEARCH_ATLAS_EMBEDDING_PROVIDER=ollama` to rank all passages and select a fitting
+context; missing capacity or a required but missing embedder fails explicitly.
+Injected models must implement `fits_context()` as well as `generate()`.
+
 ## Current API
 
 ```python

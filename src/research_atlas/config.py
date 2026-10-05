@@ -13,7 +13,7 @@ class ProviderSettings(BaseSettings):
     model_base_url: str | None = None
     model_context_tokens: int | None = Field(default=None, gt=0, strict=True)
     embedding_provider: str | None = None
-    embedding_model_name: str = "all-minilm"
+    embedding_model_name: str = "nomic-embed-text"
     embedding_base_url: str | None = None
     ollama_api_key: SecretStr | None = None
     openai_api_key: SecretStr | None = None

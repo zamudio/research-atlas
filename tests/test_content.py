@@ -9,11 +9,10 @@ from pypdf.errors import PdfReadError
 from pypdf.generic import DecodedStreamObject, DictionaryObject, NameObject
 
 import research_atlas.content as module
-import research_atlas.passages as passages_module
 from research_atlas.content import UnusableContent, prepare_content
 from research_atlas.extraction import extract_evidence
 from tests.test_embeddings import FakeEmbedder
-from tests.test_extraction import OTHER, PASSAGE, SOURCE, proposal_bytes
+from tests.test_extraction import OTHER, PASSAGE, SOURCE, FakeModel, proposal_bytes
 
 
 def text_pdf(text: str = PASSAGE, *, pages: int = 1, encrypted: bool = False) -> bytes:
@@ -67,7 +66,7 @@ def test_pdf_preparation_is_stable_and_grounding_uses_exact_text_once(
 
     monkeypatch.setattr(module, "_project_pdf", fail)
 
-    class Model:
+    class Model(FakeModel):
         async def generate(
             self, instructions: str, input_text: str, schema: Mapping[str, object]
         ) -> bytes:
@@ -75,7 +74,7 @@ def test_pdf_preparation_is_stable_and_grounding_uses_exact_text_once(
             return proposal_bytes()
 
     result = asyncio.run(
-        extract_evidence(question="learning?", source=SOURCE, content=acquired, model=Model())
+        extract_evidence(question="learning?", source=SOURCE, content=acquired, model=Model(b""))
     )
     assert result.content_sha256 == sha256(original).hexdigest()
     assert result.evidence[0].passages == (acquired.index.resolve("p0001"),)
@@ -121,12 +120,16 @@ def test_unexpected_parser_errors_surface(monkeypatch: pytest.MonkeyPatch) -> No
         prepare_content(text_pdf(), "pdf")
 
 
-def test_pdf_model_invisible_passage_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_pdf_model_invisible_passage_is_rejected() -> None:
     acquired = prepare_content(text_pdf(pages=2), "pdf")
     assert tuple(acquired.index.passages) == ("p0001", "p0002")
-    monkeypatch.setattr(passages_module, "PAPER_CONTEXT_CHARACTERS", len(f"[p0001] {PASSAGE}\n"))
 
-    class Model:
+    class Model(FakeModel):
+        async def fits_context(
+            self, instructions: str, input_text: str, schema: Mapping[str, object]
+        ) -> bool:
+            return len(input_text) <= len(f"[p0001] {PASSAGE}\n")
+
         async def generate(
             self, instructions: str, input_text: str, schema: Mapping[str, object]
         ) -> bytes:
@@ -139,7 +142,7 @@ def test_pdf_model_invisible_passage_is_rejected(monkeypatch: pytest.MonkeyPatch
                 question="learning?",
                 source=SOURCE,
                 content=acquired,
-                model=Model(),
+                model=Model(b""),
                 embedder=FakeEmbedder(((1, 0), (1, 0), (0, 1))),
             )
         )
