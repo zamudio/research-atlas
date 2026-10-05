@@ -1,27 +1,16 @@
 # Research Atlas
 
-Research Atlas is a lightweight Python component for retrieving evidence from
-open-access scholarly literature.
+**Turn a research question into traceable evidence from open-access scholarly full text.**
 
-Given a research question, Atlas discovers relevant papers through OpenAlex,
-acquires available full text, and returns ranked source passages with provenance.
-It is deliberately a bounded component rather than a complete research agent.
+Research Atlas is a small Python package for retrieving relevant passages from scholarly papers. It uses OpenAlex to discover readable works, acquires available full text, prepares the documents, and returns ranked passages with source provenance.
 
-> Research Atlas implements a bounded scholarly-evidence pipeline with explicit
-> acquisition policy, typed interfaces, provenance preservation, and graceful
-> partial failure.
-
-**Discovery is not evidence. Atlas only returns evidence from scholarly full text
-it successfully acquired and prepared.**
+It is designed to be a focused component inside scripts, research tools, and AI systems—not a complete research agent.
 
 ```text
 question
    │
    ▼
 OpenAlex discovery
-   │
-   ▼
-readable-source qualification
    │
    ▼
 full-text acquisition
@@ -36,45 +25,62 @@ passage ranking
 structured evidence
 ```
 
+## Where Atlas fits
+
+```text
+research agent / application
+        │
+        ├── web search
+        ├── code / data tools
+        ├── Research Atlas ──→ scholarly evidence
+        └── other tools
+```
+
+Atlas owns the scholarly-evidence step. The surrounding application can decide how to interpret, compare, synthesize, or present that evidence.
+
 ## Quick start
 
-Requires Python 3.14 and [uv](https://docs.astral.sh/uv/). From this checkout:
+Requires Python 3.14 and [uv](https://docs.astral.sh/uv/).
 
 ```sh
 uv sync --locked
 export RESEARCH_ATLAS_OPENALEX_API_KEY="YOUR_KEY"
-uv run atlas evidence "Does spending time outside reduce stress?" --max-papers 3
+
+uv run atlas evidence \
+  "Does spending time outside reduce stress?" \
+  --max-papers 3
 ```
 
-In PowerShell, set the key with
-`$env:RESEARCH_ATLAS_OPENALEX_API_KEY = "YOUR_KEY"`.
+In PowerShell:
 
-Atlas requires an [OpenAlex API key](https://openalex.org/settings/api) for its
-cached-content routes. [OpenAlex content downloads](https://help.openalex.org/data/works/attributes/)
-use the account's API budget. The only optional setting is
-`RESEARCH_ATLAS_HTTP_TIMEOUT_SECONDS` (default 20, greater than 0 and at most 120).
-Set environment variables directly; Atlas does not automatically load `.env`.
+```powershell
+$env:RESEARCH_ATLAS_OPENALEX_API_KEY = "YOUR_KEY"
 
-The same workflow is available in Python:
+uv run atlas evidence `
+  "Does spending time outside reduce stress?" `
+  --max-papers 3
+```
+
+Atlas requires an [OpenAlex API key](https://openalex.org/settings/api) for cached full-text content.
+
+The same workflow is available from Python:
 
 ```python
 from research_atlas import evidence
 
-# Inside an async function:
 result = await evidence(
     "Does spending time outside reduce stress?",
     max_papers=3,
 )
+
 print(result.model_dump_json(indent=2))
 ```
 
-Applications can pass `settings=Settings(...)` from `research_atlas.config`
-instead of using environment variables. No model service is needed.
+No model service, embedding model, or vector database is required.
 
 ## Result contract
 
-The CLI writes JSON to stdout. This illustrative result uses fictional paper
-metadata and passage text; it is not a research finding:
+Atlas returns structured evidence rather than a synthesized answer.
 
 ```json
 {
@@ -111,89 +117,46 @@ metadata and passage text; it is not a research finding:
 }
 ```
 
-`EvidenceResult` and its nested records are typed Pydantic models. A paper carries
-its identity once and records the successful source kind and final download URL.
-Evidence contains exact prepared passage text; ranking never edits that text.
-**Scores measure lexical retrieval relevance only**, not scientific confidence,
-effect strength, or evidence quality. Scores are calculated within each paper and
-should not be compared across papers.
+The example above uses fictional metadata and text.
 
-## Pipeline policy
+Each successful paper records:
 
-- **Discovery:** one OpenAlex `search.semantic` request uses the original question,
-  with `has_fulltext:true` and only needed metadata. Atlas inspects at most
-  [50 results](https://help.openalex.org/api/semantic-search/), preserving provider
-  order and removing duplicate work IDs. A DOI, abstract, or landing page alone
-  never qualifies a work. There are no individual metadata refetches.
-- **Acquisition:** cached GROBID XML → advertised public OA PDF URLs → cached PDF.
-  Within OA PDFs, the best OA location comes first, then the primary location,
-  then remaining locations in response order, with duplicate URLs removed.
-  Each route must download **and prepare** successfully; otherwise Atlas tries
-  the next. Only advertised routes are tried, sequentially, without retries.
-  OpenAlex credentials are sent in headers only to OpenAlex.
-- **Preparation:** XML body paragraphs retain section headings when available;
-  header abstracts and bibliography metadata are excluded. PDF text uses parser
-  page order with `section: null`; there is no OCR or layout reconstruction.
-  Whitespace is collapsed and long blocks split at word boundaries near 2,000
-  characters, without changing words, punctuation, or hyphenation. Passage IDs
-  (`p0001`, …) are stable for the same content and preparation version.
-- **Ranking:** a small BM25 implementation tokenizes and case-normalizes text,
-  removes common English stop words, and returns at most three positive-scoring
-  passages per paper. Results descend by score; ties retain source order.
-  No lexical overlap yields an empty evidence list. Synonyms and morphological
-  variants can be missed; Atlas does not interpret findings.
+- scholarly identity;
+- the full-text source that actually succeeded;
+- exact prepared source passages;
+- section information when available;
+- a lexical retrieval score.
 
-`max_papers` (default 3, allowed 1–50) counts successfully prepared papers,
-including those with no lexical match. Failed candidates do not consume this
-limit. The bounded discovery pool may yield fewer papers than requested.
+Scores indicate **passage relevance to the query only**. They are not measures of scientific confidence, evidence quality, or effect strength.
 
-Malformed work metadata, unavailable content, malformed XML, unreadable PDFs,
-and empty extraction produce per-paper failures; other papers continue.
-A failure's stage is `preparation` if any route downloaded but none could be
-prepared, otherwise `acquisition`; malformed work records use `discovery`
-with a nullable ID. Ineligible works are simply skipped.
+Failures are reported per paper so one unavailable or malformed source does not prevent useful results from other papers.
 
-Blank questions, questions over 2,000 characters, invalid limits/configuration,
-and failed discovery raise normally in Python. The CLI exits nonzero with a
-diagnostic on stderr for fatal errors; completed queries, including partial or
-empty results, exit zero. Documents are limited to 32 MiB, PDFs to 300 pages,
-individual decoded PDF streams to 8 MiB, and extracted text to four million
-characters. All processing is in memory.
+## How it works
 
-## Where Atlas fits
+Atlas deliberately keeps the pipeline small:
 
-```text
-research agent
-    │
-    ├── web/search tools
-    ├── Research Atlas → scholarly evidence
-    └── other tools
-```
+1. **Discover** — Search OpenAlex semantically using the original research question.
+2. **Qualify** — Consider only works that advertise a supported full-text route.
+3. **Acquire** — Try available GROBID XML and open-access PDF routes in a deterministic order.
+4. **Prepare** — Convert successful full text into stable, ordered passages.
+5. **Rank** — Use lightweight BM25-style lexical retrieval to select the passages most relevant to the question.
+6. **Return** — Emit typed, provenance-preserving evidence and any per-paper failures.
 
-Atlas stops at evidence retrieval. It contains no synthesis, answer generation,
-LLM providers, local embeddings, research planning, agents, MCP integration,
-UI, database, or background jobs. The Python and JSON contracts are the
-integration boundary.
+`max_papers` counts successfully prepared papers rather than failed download attempts.
 
-## Development
+## Scope and behavior
 
-The source has nine flat modules: models, configuration, OpenAlex discovery,
-acquisition, preparation, passage ranking, pipeline, CLI, and package exports.
-Runtime dependencies are `httpx`, `pydantic`, and `pypdf`.
+Research Atlas is intentionally bounded.
 
-```sh
-uv run pytest
-uv run ruff check .
-uv run ruff format --check .
-uv run pyright
-```
+- OpenAlex is the discovery source.
+- Full-text acquisition uses advertised GROBID XML and open-access PDF routes.
+- Evidence text is taken directly from prepared source content; Atlas does not rewrite it.
+- Passage ranking is deterministic lexical retrieval and can miss semantic matches with little word overlap.
+- XML preparation preserves section context where available; PDF extraction follows document page order.
+- Individual acquisition or preparation failures are returned with the result instead of aborting the entire query.
+- Fatal discovery, configuration, or request errors still fail normally.
+- Processing is bounded and performed in memory.
 
-All normal tests run offline and reject unexpected HTTP requests. Six test files
-cover discovery/qualification, fallback and provenance, real PDF and GROBID
-preparation, stable passage IDs, deterministic ranking, partial failure, request
-validation, and the complete Python/CLI workflow.
+Atlas does **not** perform synthesis, answer generation, research planning, LLM inference, embeddings, agent orchestration, MCP integration, persistence, or UI.
 
-For an optional live smoke check, run the Quick start CLI command with your key.
-It uses OpenAlex's API budget and returns whatever full text is available at that
-time. Repeated live queries must respect OpenAlex's semantic-search rate limit
-of one request per second; Atlas does not schedule or retry requests.
+Its Python and JSON contracts are the integration boundary.
