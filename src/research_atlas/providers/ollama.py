@@ -1,6 +1,7 @@
 """Ollama reference adapter; one generation, no reasoning retention."""
 
 import asyncio
+import json
 from collections.abc import Mapping
 from typing import cast
 
@@ -14,7 +15,31 @@ from research_atlas.providers._config import (
     model_base_url,
     model_name,
 )
-from research_atlas.providers._http import bearer_headers, object_fields, post_json
+from research_atlas.providers._http import array_items, bearer_headers, object_fields, post_json
+
+
+def _request_context_tokens(
+    messages: list[dict[str, str]],
+    schema: Mapping[str, object],
+    template_bytes: int,
+    model_message_overhead: int,
+    output_tokens: int,
+) -> int:
+    """Reserve one token per UTF-8 byte, including framing, plus output headroom.
+
+    Template source bytes are reserved per message and for the assistant prefix,
+    conservatively covering repeated turn wrappers without rendering the template.
+    """
+    try:
+        material = json.dumps({"messages": messages, "format": dict(schema)}, ensure_ascii=False)
+        return (
+            len(material.encode("utf-8"))
+            + template_bytes * (len(messages) + 1)
+            + model_message_overhead
+            + output_tokens
+        )
+    except TypeError, ValueError, UnicodeError:
+        raise ModelProviderError("ollama_invalid_request_material") from None
 
 
 class OllamaModel:
@@ -31,9 +56,12 @@ class OllamaModel:
         self._timeout = settings.model_timeout_seconds
         self._client = client
         self._context_override = settings.model_context_tokens
+        self._max_output_tokens = settings.model_max_output_tokens
         self._advertised_context: int | None = None
+        self._template_bytes = 0
+        self._model_message_overhead = 0
 
-    async def _context_tokens(self, client: httpx.AsyncClient) -> int:
+    async def _context_ceiling(self, client: httpx.AsyncClient) -> int:
         if self._advertised_context is None:
             fields = await post_json(
                 client,
@@ -56,6 +84,23 @@ class OllamaModel:
                     raise ValueError
             except ValueError:
                 raise ModelProviderError("ollama_invalid_context_metadata") from None
+            try:
+                template = fields.get("template", "")
+                if not isinstance(template, str):
+                    raise ValueError
+                template_bytes = len(template.encode("utf-8"))
+                # Ollama prepends any messages embedded in the selected model.
+                model_messages = array_items(fields.get("messages", []))
+                model_message_overhead = (
+                    len(json.dumps(model_messages, ensure_ascii=False).encode("utf-8"))
+                    + template_bytes * len(model_messages)
+                    if model_messages
+                    else 0
+                )
+            except ValueError, TypeError, UnicodeError:
+                raise ModelProviderError("ollama_invalid_template_metadata") from None
+            self._template_bytes = template_bytes
+            self._model_message_overhead = model_message_overhead
             self._advertised_context = context
         if self._context_override is not None:
             if self._context_override > self._advertised_context:
@@ -78,17 +123,32 @@ class OllamaModel:
         input_text: str,
         schema: Mapping[str, object],
     ) -> bytes:
-        context_tokens = await self._context_tokens(client)
+        ceiling = await self._context_ceiling(client)
+        messages = [
+            {"role": "system", "content": instructions},
+            {"role": "user", "content": input_text},
+        ]
+        output_schema = dict(schema)
+        context_tokens = _request_context_tokens(
+            messages,
+            output_schema,
+            self._template_bytes,
+            self._model_message_overhead,
+            self._max_output_tokens,
+        )
+        if context_tokens > ceiling:
+            raise ModelProviderError("ollama_context_requirement_exceeds_limit")
         payload = {
             "model": self._model,
             "stream": False,
             "think": False,
-            "format": dict(schema),
-            "messages": [
-                {"role": "system", "content": instructions},
-                {"role": "user", "content": input_text},
-            ],
-            "options": {"temperature": 0, "num_ctx": context_tokens},
+            "format": output_schema,
+            "messages": messages,
+            "options": {
+                "temperature": 0,
+                "num_ctx": context_tokens,
+                "num_predict": self._max_output_tokens,
+            },
         }
         try:
             async with asyncio.timeout(self._timeout):

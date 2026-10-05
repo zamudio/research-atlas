@@ -317,8 +317,14 @@ def expected_payload(
         ],
     }
     if case.name == "ollama":
+        material = {"messages": payload["messages"], "format": schema}
+        required = len(json.dumps(material, ensure_ascii=False).encode("utf-8")) + 8192
         payload.update(
-            {"think": False, "format": schema, "options": {"temperature": 0, "num_ctx": 32768}}
+            {
+                "think": False,
+                "format": schema,
+                "options": {"temperature": 0, "num_ctx": required, "num_predict": 8192},
+            }
         )
     else:
         payload["response_format"] = {
@@ -335,7 +341,7 @@ def expected_payload(
 
 
 @pytest.mark.parametrize("case", CASES, ids=lambda case: case.name)
-@pytest.mark.parametrize("context_override", [None, 8192])
+@pytest.mark.parametrize("context_override", [None, 16384])
 def test_exact_request_auth_and_cross_provider_result(
     case: ProviderCase, context_override: int | None
 ) -> None:
@@ -362,8 +368,6 @@ def test_exact_request_auth_and_cross_provider_result(
             assert request.headers["anthropic-version"] == "2023-06-01"
             assert "anthropic-beta" not in request.headers
         expected = expected_payload(case, schema, indexed)
-        if case.name == "ollama" and context_override is not None:
-            expected["options"] = {"temperature": 0, "num_ctx": context_override}
         assert json.loads(request.content) == expected
         assert request.extensions["timeout"] == {
             "connect": 600,

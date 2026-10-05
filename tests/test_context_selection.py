@@ -56,6 +56,25 @@ def test_small_paper_preserves_entire_index_and_never_embeds(with_embedder: bool
     assert embedder.calls == []
 
 
+def test_small_paper_failing_embedder_is_never_called_and_extraction_proceeds() -> None:
+    index = build_passage_index(project_grobid(XML))
+
+    class FailingEmbedder(FakeEmbedder):
+        async def embed(self, texts: tuple[str, ...]) -> tuple[tuple[float, ...], ...]:
+            self.calls.append(texts)
+            raise EmbeddingError("ollama_embedding_transport_failure")
+
+    embedder = FailingEmbedder(())
+    assert asyncio.run(select_context(index, "q", embedder)) is index
+    model = FakeModel(proposal_bytes())
+    result = asyncio.run(
+        extract_evidence(question="q", source=SOURCE, content=XML, model=model, embedder=embedder)
+    )
+    assert result.evidence[0].passages == (index.resolve("p0001"),)
+    assert embedder.calls == []
+    assert model.calls == 1
+
+
 def test_exact_threshold_retains_full_paper(monkeypatch: pytest.MonkeyPatch) -> None:
     index = build_passage_index(project_grobid(XML))
     embedder = FakeEmbedder(((1, 0), (1, 0), (0, 1)))
@@ -174,10 +193,9 @@ def test_selected_extraction_grounding_empty_output_and_rejected_ids(
     assert full.resolve("p0020")  # Still available in the authoritative full index.
 
 
-@pytest.mark.parametrize("fault", ["missing", "validation", "provider"])
 @pytest.mark.parametrize("ids", [("p0020",), (), ("p9999",), ("p0020", "p0020")])
-def test_large_paper_unavailable_embeddings_preserve_full_paper_extraction(
-    fault: str, ids: tuple[str, ...], monkeypatch: pytest.MonkeyPatch
+def test_large_paper_without_embedder_preserves_full_paper_extraction(
+    ids: tuple[str, ...], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     content, _ = large_paper()
     full = build_passage_index(project_grobid(content))
@@ -189,10 +207,6 @@ def test_large_paper_unavailable_embeddings_preserve_full_paper_extraction(
 
     monkeypatch.setattr(content_module, "project_grobid", project)
 
-    class FailingEmbedder:
-        async def embed(self, texts: tuple[str, ...]) -> tuple[tuple[float, ...], ...]:
-            raise EmbeddingError("ollama_embedding_transport_failure")
-
     class CheckingModel(FakeModel):
         async def generate(
             self, instructions: str, input_text: str, schema: Mapping[str, object]
@@ -201,17 +215,12 @@ def test_large_paper_unavailable_embeddings_preserve_full_paper_extraction(
             assert len(input_text) > PAPER_CONTEXT_CHARACTERS
             return await super().generate(instructions, input_text, schema)
 
-    embedder = (
-        None
-        if fault == "missing"
-        else (FakeEmbedder(()) if fault == "validation" else FailingEmbedder())
-    )
-    assert asyncio.run(select_context(full, "q", embedder)) is full
+    assert asyncio.run(select_context(full, "q", None)) is full
     model = CheckingModel(proposal_bytes(ids) if ids else b'{"evidence":[]}')
 
     async def extract() -> None:
         result = await extract_evidence(
-            question="q", source=SOURCE, content=content, model=model, embedder=embedder
+            question="q", source=SOURCE, content=content, model=model, embedder=None
         )
         assert result.content_sha256 == sha256(content).hexdigest()
         assert result.source is SOURCE
@@ -226,6 +235,44 @@ def test_large_paper_unavailable_embeddings_preserve_full_paper_extraction(
             asyncio.run(extract())
     assert model.calls == 1
     assert projections == [content]
+
+
+@pytest.mark.parametrize(
+    "code",
+    [
+        "malformed_embedding_vectors",
+        "ollama_embedding_transport_failure",
+        "ollama_embedding_http_failure",
+    ],
+)
+def test_large_paper_embedding_failure_propagates_before_model_generation(code: str) -> None:
+    content, _ = large_paper()
+    full = build_passage_index(project_grobid(content))
+    assert len(full.model_text) > PAPER_CONTEXT_CHARACTERS
+    error = EmbeddingError(code)
+
+    class FailingEmbedder:
+        async def embed(self, texts: tuple[str, ...]) -> tuple[tuple[float, ...], ...]:
+            raise error
+
+    embedder = FakeEmbedder(()) if code == "malformed_embedding_vectors" else FailingEmbedder()
+    with pytest.raises(EmbeddingError) as selected_error:
+        asyncio.run(select_context(full, "q", embedder))
+    assert str(selected_error.value) == code
+    if code != "malformed_embedding_vectors":
+        assert selected_error.value is error
+
+    model = FakeModel(proposal_bytes())
+    with pytest.raises(EmbeddingError) as extraction_error:
+        asyncio.run(
+            extract_evidence(
+                question="q", source=SOURCE, content=content, model=model, embedder=embedder
+            )
+        )
+    assert str(extraction_error.value) == code
+    if code != "malformed_embedding_vectors":
+        assert extraction_error.value is error
+    assert model.calls == 0
 
 
 @pytest.mark.parametrize(
@@ -249,18 +296,23 @@ def test_large_paper_unrelated_embedding_errors_propagate(error: Exception) -> N
     assert model.calls == 0
 
 
+@pytest.mark.parametrize("fault", [None, "validation", "provider"])
 def test_semantic_review_uses_embedder_only_for_large_paper_extraction(
     monkeypatch: pytest.MonkeyPatch,
+    fault: str | None,
 ) -> None:
     monkeypatch.setattr(openalex_module, "_pace_semantic", lambda: no_sleep(0))
     content, passage_embedder = large_paper()
     calls: list[tuple[str, ...]] = []
     visible: list[str] = []
+    error = EmbeddingError("ollama_embedding_transport_failure")
 
     class SharedEmbedder:
         async def embed(self, texts: tuple[str, ...]) -> tuple[tuple[float, ...], ...]:
             calls.append(texts)
-            return passage_embedder.vectors
+            if fault == "provider":
+                raise error
+            return () if fault == "validation" else passage_embedder.vectors
 
     class Model:
         async def generate(
@@ -291,6 +343,21 @@ def test_semantic_review_uses_embedder_only_for_large_paper_extraction(
 
     async def scenario() -> None:
         async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            if fault is not None:
+                with pytest.raises(EmbeddingError) as raised:
+                    await collect_evidence(
+                        "question",
+                        literature=OpenAlex(KEY, client),
+                        model=Model(),
+                        embedder=SharedEmbedder(),
+                        max_sources=1,
+                    )
+                assert str(raised.value) == (
+                    "malformed_embedding_vectors" if fault == "validation" else str(error)
+                )
+                if fault == "provider":
+                    assert raised.value is error
+                return
             result = await collect_evidence(
                 "question",
                 literature=OpenAlex(KEY, client),
@@ -307,7 +374,10 @@ def test_semantic_review_uses_embedder_only_for_large_paper_extraction(
     assert len(calls) == 1
     assert len(calls[0]) == len(passage_embedder.vectors)
     assert all(texts[0] == "question" for texts in calls)
-    assert len(visible) == 1 and len(visible[0]) <= PAPER_CONTEXT_CHARACTERS
+    if fault is None:
+        assert len(visible) == 1 and len(visible[0]) <= PAPER_CONTEXT_CHARACTERS
+    else:
+        assert visible == []
 
 
 def test_full_index_can_supply_another_context_view_later() -> None:

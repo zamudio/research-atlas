@@ -10,7 +10,10 @@ from research_atlas.config import ProviderSettings
 from research_atlas.extraction import EXTRACTION_INSTRUCTIONS, ExtractionProposal
 from research_atlas.passages import build_passage_index
 from research_atlas.providers import ModelProviderError
-from research_atlas.providers.ollama import OllamaModel
+from research_atlas.providers.ollama import (
+    OllamaModel,
+    _request_context_tokens,  # pyright: ignore[reportPrivateUsage]
+)
 
 MODEL_INFO = {
     "model_info": {"general.architecture": "reference", "reference.context_length": 32768}
@@ -48,7 +51,8 @@ def test_ollama_request_contract_configured_endpoint_and_exact_content() -> None
                 {"role": "system", "content": EXTRACTION_INSTRUCTIONS},
                 {"role": "user", "content": indexed_text},
             ],
-            "options": {"temperature": 0, "num_ctx": 32768},
+            # 2,139 UTF-8 bytes of framed messages/schema plus 8,192 output tokens.
+            "options": {"temperature": 0, "num_ctx": 10331, "num_predict": 8192},
         }
         assert request.extensions["timeout"] == {
             "connect": 600,
@@ -215,7 +219,10 @@ def test_ollama_context_default_override_and_metadata_cache(
     architecture: str, maximum: int, override: int | str | None
 ) -> None:
     configured = maximum if override == "maximum" else override
+    assert configured is None or isinstance(configured, int)
     calls: list[str] = []
+    requested: list[int] = []
+    schema = {"description": "private schema"}
 
     def handler(request: httpx.Request) -> httpx.Response:
         calls.append(request.url.path)
@@ -234,10 +241,20 @@ def test_ollama_context_default_override_and_metadata_cache(
                 },
             )
         assert request.url.path == "/api/chat"
-        assert json.loads(request.content)["options"] == {
+        payload = json.loads(request.content)
+        material = {"messages": payload["messages"], "format": payload["format"]}
+        required = (
+            len(json.dumps(material, ensure_ascii=False).encode("utf-8"))
+            + len(b"private model template") * 3
+            + 256
+        )
+        assert payload["options"] == {
             "temperature": 0,
-            "num_ctx": maximum if configured is None else configured,
+            "num_ctx": required,
+            "num_predict": 256,
         }
+        assert required < (maximum if configured is None else configured)
+        requested.append(required)
         return httpx.Response(
             200, json={"model": "reference:4b", "done": True, "message": {"content": "{}"}}
         )
@@ -246,20 +263,28 @@ def test_ollama_context_default_override_and_metadata_cache(
         async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
             provider = OllamaModel(
                 ProviderSettings.model_validate(
-                    {"model_name": "reference:4b", "model_context_tokens": configured}
+                    {
+                        "model_name": "reference:4b",
+                        "model_context_tokens": configured,
+                        "model_max_output_tokens": 256,
+                    }
                 ),
                 client,
             )
-            for _ in range(2):
-                assert (
-                    await provider.generate("private instructions", "private document", {}) == b"{}"
-                )
+            for document in ("private document", "private document" * 30):
+                assert await provider.generate("private instructions", document, schema) == b"{}"
             state = repr(vars(provider))
-            for private in ("private model template", "private instructions", "private document"):
+            for private in (
+                "private model template",
+                "private instructions",
+                "private document",
+                "private schema",
+            ):
                 assert private not in state
 
     run(scenario())
     assert calls == ["/api/show", "/api/chat", "/api/chat"]
+    assert requested[0] < requested[1] < maximum
 
 
 def test_ollama_context_override_above_maximum_fails_before_chat() -> None:
@@ -399,3 +424,226 @@ def test_ollama_failed_metadata_discovery_is_not_cached() -> None:
 
     run(scenario())
     assert calls == ["/api/show", "/api/show", "/api/chat"]
+
+
+@pytest.mark.parametrize(
+    "instructions,document,schema,template_bytes,model_overhead,output_tokens,expected",
+    [
+        ("i", "d", {}, 0, 0, 7, 105),
+        ("instructions", "document", {}, 0, 0, 7, 123),
+        ("i", "é", {}, 0, 0, 7, 106),
+        ("研", "🌳", {}, 0, 0, 7, 110),
+        ("i", "d", {"description": "x"}, 0, 0, 7, 123),
+        ("i", "d", {}, 5, 0, 7, 120),
+        ("i", "d", {}, 0, 11, 7, 116),
+        ("i", "d", {}, 0, 0, 19, 117),
+    ],
+)
+def test_request_context_utf8_schema_framing_template_and_output_reserve(
+    instructions: str,
+    document: str,
+    schema: dict[str, object],
+    template_bytes: int,
+    model_overhead: int,
+    output_tokens: int,
+    expected: int,
+) -> None:
+    # The minimal framed messages plus empty schema occupy 98 bytes, not two characters.
+    messages = [
+        {"role": "system", "content": instructions},
+        {"role": "user", "content": document},
+    ]
+    assert (
+        _request_context_tokens(messages, schema, template_bytes, model_overhead, output_tokens)
+        == expected
+    )
+
+
+@pytest.mark.parametrize("limit_source", ["model", "override"])
+@pytest.mark.parametrize("margin", [-1, 0, 1])
+def test_ollama_request_respects_model_and_user_ceiling_including_equality(
+    limit_source: str, margin: int
+) -> None:
+    required = 105  # 98 framed UTF-8 input/schema bytes + 7 configured output tokens.
+    ceiling = required + margin
+    calls: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request.url.path)
+        if request.url.path == "/api/show":
+            maximum = ceiling if limit_source == "model" else 1000
+            return httpx.Response(200, json={"model_info": {"reference.context_length": maximum}})
+        assert request.url.path == "/api/chat"
+        assert json.loads(request.content)["options"] == {
+            "temperature": 0,
+            "num_ctx": required,
+            "num_predict": 7,
+        }
+        return httpx.Response(
+            200, json={"model": "reference:4b", "done": True, "message": {"content": "{}"}}
+        )
+
+    async def scenario() -> None:
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            provider = OllamaModel(
+                ProviderSettings(
+                    model_name="reference:4b",
+                    model_context_tokens=ceiling if limit_source == "override" else None,
+                    model_max_output_tokens=7,
+                ),
+                client,
+            )
+            if margin < 0:
+                with pytest.raises(ModelProviderError) as error:
+                    await provider.generate("i", "d", {})
+                assert str(error.value) == "ollama_context_requirement_exceeds_limit"
+                assert error.value.__cause__ is None
+            else:
+                assert await provider.generate("i", "d", {}) == b"{}"
+
+    run(scenario())
+    assert calls == (["/api/show"] if margin < 0 else ["/api/show", "/api/chat"])
+
+
+@pytest.mark.parametrize("template", ["", "<turn>{{.Content}}</turn>", "🌳{{.Content}}研"])
+@pytest.mark.parametrize("output_tokens", [1, 127])
+def test_ollama_model_template_and_embedded_messages_contribute_without_retention(
+    template: str, output_tokens: int
+) -> None:
+    model_messages = [{"role": "user", "content": "private embedded message 旧记忆"}]
+    calls: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request.url.path)
+        if request.url.path == "/api/show":
+            return httpx.Response(
+                200, json={**MODEL_INFO, "template": template, "messages": model_messages}
+            )
+        assert request.url.path == "/api/chat"
+        # Two request messages, one embedded model message, and an assistant prefix.
+        required = (
+            98
+            + 4 * len(template.encode("utf-8"))
+            + len(json.dumps(model_messages, ensure_ascii=False).encode("utf-8"))
+            + output_tokens
+        )
+        assert json.loads(request.content)["options"] == {
+            "temperature": 0,
+            "num_ctx": required,
+            "num_predict": output_tokens,
+        }
+        return httpx.Response(
+            200, json={"model": "reference:4b", "done": True, "message": {"content": "{}"}}
+        )
+
+    async def scenario() -> None:
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            provider = OllamaModel(
+                ProviderSettings(model_name="reference:4b", model_max_output_tokens=output_tokens),
+                client,
+            )
+            for _ in range(2):
+                assert await provider.generate("i", "d", {}) == b"{}"
+            state = repr(vars(provider))
+            assert "private embedded message" not in state
+            if template:
+                assert template not in state
+
+    run(scenario())
+    assert calls == ["/api/show", "/api/chat", "/api/chat"]
+
+
+@pytest.mark.parametrize(
+    "metadata",
+    [
+        {"template": None},
+        {"template": 42},
+        {"template": {"private": "template"}},
+        {"template": "\ud800"},
+        {"messages": None},
+        {"messages": "private embedded messages"},
+        {"messages": [{"content": "\ud800"}]},
+    ],
+)
+def test_ollama_invalid_template_metadata_fails_safely(metadata: dict[str, object]) -> None:
+    calls: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request.url.path)
+        return httpx.Response(200, content=json.dumps({**MODEL_INFO, **metadata}).encode())
+
+    async def scenario() -> None:
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            provider = OllamaModel(ProviderSettings(model_name="reference:4b"), client)
+            with pytest.raises(ModelProviderError) as error:
+                await provider.generate("private instructions", "private document", {})
+            assert str(error.value) == "ollama_invalid_template_metadata"
+            assert error.value.__cause__ is None
+
+    run(scenario())
+    assert calls == ["/api/show"]
+
+
+def test_ollama_oversized_request_does_not_leak_or_retain_material_and_metadata_is_cached() -> None:
+    calls: list[str] = []
+    instructions = "private instructions"
+    document = "private document" * 10
+    schema = {"description": "private schema"}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request.url.path)
+        if request.url.path == "/api/show":
+            return httpx.Response(
+                200,
+                json={
+                    "model_info": {"reference.context_length": 1000},
+                    "template": "private template",
+                },
+            )
+        return httpx.Response(
+            200, json={"model": "reference:4b", "done": True, "message": {"content": "{}"}}
+        )
+
+    async def scenario() -> None:
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            provider = OllamaModel(
+                ProviderSettings(
+                    model_name="reference:4b", model_context_tokens=200, model_max_output_tokens=7
+                ),
+                client,
+            )
+            with pytest.raises(ModelProviderError) as error:
+                await provider.generate(instructions, document, schema)
+            assert str(error.value) == "ollama_context_requirement_exceeds_limit"
+            for private in (instructions, document, "private schema", "private template"):
+                assert private not in str(error.value)
+                assert private not in repr(vars(provider))
+            assert await provider.generate("i", "d", {}) == b"{}"
+
+    run(scenario())
+    assert calls == ["/api/show", "/api/chat"]
+
+
+@pytest.mark.parametrize(
+    "instructions,document,schema",
+    [("\ud800", "d", {}), ("i", "\ud800", {}), ("i", "d", {"private": object()})],
+)
+def test_ollama_invalid_request_material_fails_safely_before_chat(
+    instructions: str, document: str, schema: dict[str, object]
+) -> None:
+    calls: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request.url.path)
+        return httpx.Response(200, json=MODEL_INFO)
+
+    async def scenario() -> None:
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            provider = OllamaModel(ProviderSettings(model_name="reference:4b"), client)
+            with pytest.raises(ModelProviderError) as error:
+                await provider.generate(instructions, document, schema)
+            assert str(error.value) == "ollama_invalid_request_material"
+            assert error.value.__cause__ is None
+
+    run(scenario())
+    assert calls == ["/api/show"]

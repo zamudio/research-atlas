@@ -4,7 +4,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from types import MappingProxyType
 
-from research_atlas.embeddings import Embedder, EmbeddingError, rank_texts
+from research_atlas.embeddings import Embedder, rank_texts
 
 MAX_PASSAGE_CHARACTERS = 20_000
 PAPER_CONTEXT_CHARACTERS = 60_000
@@ -47,16 +47,13 @@ def build_passage_index(content: bytes) -> PassageIndex:
 async def select_context(
     index: PassageIndex, question: str, embedder: Embedder | None
 ) -> PassageIndex:
-    """Reduce large papers when embeddings work; otherwise preserve full-paper context."""
+    """Reduce large papers with a configured embedder; propagate embedding failures."""
     if embedder is None or len(index.model_text) <= PAPER_CONTEXT_CHARACTERS:
         return index
     passages = tuple(index.passages.items())
-    try:
-        order = await rank_texts(
-            question, tuple(text[:PASSAGE_EMBEDDING_CHARACTERS] for _, text in passages), embedder
-        )
-    except EmbeddingError:
-        return index
+    order = await rank_texts(
+        question, tuple(text[:PASSAGE_EMBEDDING_CHARACTERS] for _, text in passages), embedder
+    )
     selected: set[int] = set()
     # Each entry costs its ID, text, and two separating newlines; the last costs one less.
     used = -1
