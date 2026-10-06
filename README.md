@@ -42,26 +42,47 @@ Atlas owns the scholarly-evidence step. The surrounding application can decide h
 
 Requires Python 3.14 and [uv](https://docs.astral.sh/uv/).
 
+**macOS / Linux**
+
 ```sh
 uv sync --locked
-export RESEARCH_ATLAS_OPENALEX_API_KEY="YOUR_KEY"
+cp .env.example .env
+```
 
+**Windows PowerShell**
+
+```powershell
+uv sync --locked
+Copy-Item .env.example .env
+```
+
+Add your OpenAlex API key to `.env`:
+
+```text
+RESEARCH_ATLAS_OPENALEX_API_KEY=YOUR_KEY
+```
+
+Then run Atlas.
+
+**macOS / Linux**
+
+```sh
 uv run atlas evidence \
   "Does spending time outside reduce stress?" \
   --max-papers 3
 ```
 
-In PowerShell:
+**Windows PowerShell**
 
 ```powershell
-$env:RESEARCH_ATLAS_OPENALEX_API_KEY = "YOUR_KEY"
-
 uv run atlas evidence `
   "Does spending time outside reduce stress?" `
   --max-papers 3
 ```
 
 Atlas requires an [OpenAlex API key](https://openalex.org/settings/api) for cached full-text content.
+
+Normal environment variables are also supported and take precedence over values in `.env`.
 
 The same workflow is available from Python:
 
